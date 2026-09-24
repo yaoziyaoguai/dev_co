@@ -1,0 +1,7 @@
+interface:
+  display_name: "dev_co"
+  short_description: "从新项目到持续开发，维护当前共识、控制推进节奏，并按影响范围验证"
+  default_prompt: "使用 $dev_co 帮我启动或继续这个项目：先恢复当前目标与决定，选择本轮可交付结果，按影响范围验证并更新项目记忆。"
+
+policy:
+  allow_implicit_invocation: true
