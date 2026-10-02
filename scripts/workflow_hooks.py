@@ -12,8 +12,17 @@ import sys
 import project_workflow as workflow
 
 
-def config(host: str, state: str | None, protect_tools: list[str]) -> dict:
+def configured_root(root: Path) -> Path:
+    resolved = root.resolve()
+    if not resolved.is_dir():
+        raise workflow.WorkflowError("项目目录不存在或不是目录：" + str(resolved))
+    return resolved
+
+
+def config(host: str, state: str | None, protect_tools: list[str], root: Path | None = None) -> dict:
     base = [sys.executable, str(Path(__file__).resolve()), "--host", host]
+    if root is not None:
+        base.extend(["--root", str(configured_root(root))])
     if state:
         base.extend(["--state", state])
     command = shlex.join(base)
@@ -31,7 +40,8 @@ def config(host: str, state: str | None, protect_tools: list[str]) -> dict:
     return {"hooks": hooks}
 
 
-def respond(payload: dict, state_name: str | None = None, protect: bool = False) -> dict:
+def respond(payload: dict, state_name: str | None = None, protect: bool = False,
+            root: Path | None = None) -> dict:
     event = payload.get("hook_event_name")
     if event not in {"SessionStart", "Stop", "PreToolUse"}:
         return {}
@@ -39,7 +49,7 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False)
         cwd = payload.get("cwd")
         if not isinstance(cwd, str) or not cwd or not Path(cwd).is_absolute() or not Path(cwd).is_dir():
             raise workflow.WorkflowError("hook 缺少有效的项目 cwd。")
-        root = workflow.project_root(Path(cwd))
+        root = configured_root(root) if root is not None else workflow.project_root(Path(cwd))
         state = workflow.locate_state(root, state_name)
         if not state:
             if protect or state_name:
@@ -85,19 +95,21 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False)
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", choices=("codex", "claude"), required=True)
+    parser.add_argument("--root", type=Path, help="显式项目根目录；生成配置时固化为绝对路径。")
     parser.add_argument("--state")
     parser.add_argument("--protect", action="store_true")
     parser.add_argument("--print-config", action="store_true")
     parser.add_argument("--protect-tool", action="append", default=[])
     args = parser.parse_args()
-    if args.print_config:
-        print(json.dumps(config(args.host, args.state, args.protect_tool), ensure_ascii=False, indent=2))
-        return 0
     try:
+        if args.print_config:
+            print(json.dumps(config(args.host, args.state, args.protect_tool, args.root),
+                             ensure_ascii=False, indent=2))
+            return 0
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("hook 输入必须为对象")
-        result = respond(payload, args.state, args.protect)
+        result = respond(payload, args.state, args.protect, args.root)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except (OSError, ValueError, TypeError, workflow.WorkflowError) as error:

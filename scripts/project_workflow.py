@@ -21,7 +21,7 @@ CANDIDATES = ("docs/CURRENT.md", "docs/PROJECT.md", "CURRENT.md")
 PHASES = {"explore", "shape", "build", "repair", "recover", "deliver"}
 STATUSES = {"active", "needs-user", "blocked", "paused", "ready", "done"}
 IGNORED = {".git", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".project-workflow"}
-OPERATIONAL_SECTIONS = {"最近验证", "下一步", "接手记录"}
+NON_INTENT_SECTIONS = {"最近验证", "下一步", "接手记录", "候选想法"}
 RUN_ID = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{8}")
 
 
@@ -96,6 +96,13 @@ def identity(root: Path) -> dict:
             "branch": git_value(root, "symbolic-ref", "--short", "HEAD")}
 
 
+def dependent_identity(value: dict, plan: dict) -> dict:
+    # 分支/提交仍保留在证据中；只有声明依赖 Git 时才据此作废检查。
+    if plan.get("freshness", "git") == "content":
+        return {"root": value.get("root")}
+    return value
+
+
 def locate_state(root: Path, requested: str | None = None) -> Path | None:
     candidates = (requested,) if requested else CANDIDATES
     for name in candidates:
@@ -138,14 +145,33 @@ def load_state(path: Path) -> tuple[dict, str]:
 
 
 def intent(meta: dict, body: str) -> str:
-    # 验证结果和下一步会自然变化，不应因此使同一目标的有效证据失效。
+    # 仅真正的一级/二级标题切换段落；示例代码内的标题不能隐藏有效要求。
     kept, skip = [], False
+    fence = None
+    conservative = False
     for line in body.splitlines():
-        if line.startswith("## "):
-            skip = line[3:].strip() in OPERATIONAL_SECTIONS
+        if fence:
+            if re.fullmatch(r" {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}[ \t]*", line):
+                fence = None
+        else:
+            # 缩进/容器围栏保守绑定整篇，避免列表结束后把闭围栏误作开围栏。
+            if (re.match(r"^[ \t]+(?:`{3,}|~{3,})", line)
+                    or re.match(r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+|>).*?(?:`{3,}|~{3,})", line)):
+                conservative = True
+                break
+            opening = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if opening and (opening[1][0] == "~" or "`" not in opening[2]):
+                fence = opening[1]
+            else:
+                heading = re.match(r"^ {0,3}(#{1,2})(?:[ \t]+(.*))?$", line)
+                if heading:
+                    title = re.sub(r"[ \t]+#+[ \t]*$", "", heading[2] or "").strip()
+                    skip = heading[1] == "##" and title in NON_INTENT_SECTIONS
         if not skip:
             kept.append(line)
-    return digest({"goal_revision": meta.get("goal_revision", 1), "body": "\n".join(kept).strip()})
+    # 旧算法可能漏掉围栏之后的要求，不能把旧指纹直接视作已修复的证据。
+    return digest({"version": 2, "goal_revision": meta.get("goal_revision", 1),
+                   "body": body.strip() if conservative or fence else "\n".join(kept).strip()})
 
 
 def verification_plan(meta: dict) -> dict:
@@ -156,6 +182,8 @@ def verification_plan(meta: dict) -> dict:
         raise WorkflowError("verification.level 必须为 none/targeted/integration/release。")
     if not isinstance(plan.get("reason"), str) or not plan["reason"].strip():
         raise WorkflowError("说明选择本轮验证范围的理由。")
+    if plan.get("freshness", "git") not in ("git", "content"):
+        raise WorkflowError("verification.freshness 必须为 git/content；省略时沿用 git。")
     checks = plan.get("checks", [])
     if not isinstance(checks, list):
         raise WorkflowError("verification.checks 必须是列表。")
@@ -254,9 +282,13 @@ def gate(root: Path, state: Path) -> dict:
         return {"ready": False, "reasons": ["当前项目没有验证执行记录。"]}
     current = snapshot(root, plan["inputs"], state)
     reasons = []
-    expected = {"identity": identity(root), "plan_hash": digest(plan),
+    expected = {"plan_hash": digest(plan),
                 "intent_hash": intent(meta, body), "input_hash": current["digest"],
                 "environment": meta.get("environment", "local")}
+    recorded_identity = report.get("identity")
+    if (not isinstance(recorded_identity, dict)
+            or dependent_identity(recorded_identity, plan) != dependent_identity(identity(root), plan)):
+        reasons.append("证据已过期或不匹配：identity")
     for key, value in expected.items():
         if report.get(key) != value:
             reasons.append("证据已过期或不匹配：" + key)
@@ -370,7 +402,8 @@ def verify(root: Path, state: Path) -> dict:
             "plan_hash": digest(plan), "intent_hash": intent(meta, body),
             "input_hash": before["digest"], "coverage": list(before["files"]),
             "excluded": before["excluded"], "checks": runs,
-            "inputs_changed": before != after or before_identity != identity(root)
+            "inputs_changed": before != after
+            or dependent_identity(before_identity, plan) != dependent_identity(identity(root), plan)
             or digest(plan) != digest(verification_plan(after_meta))
             or intent(meta, body) != intent(after_meta, after_body)
             or meta["environment"] != after_meta["environment"],
@@ -392,11 +425,13 @@ def initialize(root: Path, relative: str, goal: str) -> Path:
     meta = {"workflow": WORKFLOW, "schema": 1, "phase": "explore", "status": "active",
             "goal_revision": 1, "environment": "local",
             "verification": {"level": "none", "reason": "尚在确定本轮成果。",
+                             "freshness": "content",
                              "inputs": [], "checks": []}}
     body = (
         "# 当前项目工作\n\n## 本轮目标\n" + goal +
         "\n\n## 验收标准\n尚未确定；由 agent 根据当前目标起草，区分建议与已确定要求。"
-        "\n\n## 当前决定\n- 当前有效：尚未记录。\n- 候选：尚未记录。\n- 已替代：尚未记录。"
+        "\n\n## 当前决定\n- 当前有效：尚未记录。\n- 已替代：尚未记录。"
+        "\n\n## 候选想法\n尚未记录；采纳后移入当前决定或验收标准。"
         "\n\n## 代码导航\n尚未定位；仅补充本轮需要的入口、模块和测试。"
         "\n\n## 推进约定\n沿用项目已有约定；局部修改运行相关检查，扩大验证需要具体理由。"
         "\n\n## 最近验证\n尚未执行。\n\n## 下一步\n明确最影响推进的未知，并选择一个可观察的下一步。\n"

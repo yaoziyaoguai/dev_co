@@ -69,6 +69,11 @@ class EvidenceTests(ProjectFixture):
             workflow.initialize(self.root, "docs/CURRENT.md", "overwrite")
         self.assertEqual(self.state.read_bytes(), before)
 
+    def test_new_records_declare_content_freshness(self):
+        other = workflow.initialize(self.root, "notes/new.md", "new goal")
+        meta, _ = workflow.load_state(other)
+        self.assertEqual(meta["verification"]["freshness"], "content")
+
     def test_custom_state_and_unconfigured_document(self):
         self.state.unlink()
         custom = workflow.initialize(self.root, "notes/active.md", "custom goal")
@@ -173,6 +178,160 @@ class EvidenceTests(ProjectFixture):
         self.save()
         self.assertFalse(self.gate()["ready"])
 
+    def test_fenced_headings_cannot_hide_effective_decisions(self):
+        for opening, closing, nested in (
+            ("```markdown", "```", ""),
+            ("~~~markdown", "~~~", ""),
+            ("````markdown", "`````", "```\n"),
+            ("   ~~~~ markdown", "  ~~~~  ", "~~~\n```\n"),
+        ):
+            with self.subTest(opening=opening):
+                self.body = ("## 当前决定\n引用示例：\n" + opening + "\n" + nested
+                             + "## 下一步\n示例文字\n" + closing
+                             + "\n\n当前有效决定：保留旧接口。\n\n## 验收标准\n检查通过。\n")
+                self.save()
+                self.assertTrue(self.verify()["ready"])
+                self.body = self.body.replace("保留旧接口", "删除旧接口")
+                self.save()
+                self.assertFalse(self.gate()["ready"])
+
+    def test_old_intent_algorithm_requires_fresh_evidence(self):
+        self.assertTrue(self.verify()["ready"])
+        report = workflow.read_evidence(self.root)
+        kept, skip = [], False
+        for line in self.body.splitlines():
+            if line.startswith("## "):
+                skip = line[3:].strip() in {"最近验证", "下一步", "接手记录"}
+            if not skip:
+                kept.append(line)
+        report["intent_hash"] = workflow.digest({
+            "goal_revision": self.meta["goal_revision"], "body": "\n".join(kept).strip(),
+        })
+        workflow.write_json(workflow.evidence_path(self.root), report)
+        self.assertFalse(self.gate()["ready"])
+        self.assertTrue(self.verify()["ready"])
+
+    def test_fenced_headings_do_not_end_operational_section(self):
+        self.body = "## 本轮目标\n维持行为。\n## 最近验证\n```md\n## 验收标准\n示例 A\n```\n"
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+        self.body = self.body.replace("示例 A", "示例 B")
+        self.save()
+        self.assertTrue(self.gate()["ready"])
+
+    def test_container_fences_cannot_hide_following_acceptance(self):
+        for prefix, indent in (("- ", "  "), ("1. ", "   "), ("> ", "> ")):
+            for following in ("", "\n```\n另一个例子\n```\n"):
+                with self.subTest(prefix=prefix, following=following):
+                    self.body = ("## 候选想法\n" + prefix + "```markdown\n"
+                                 + indent + "示例\n" + indent + "```\n\n"
+                                 + "## 验收标准\n必须保留旧接口。\n" + following)
+                    self.save()
+                    self.assertTrue(self.verify()["ready"])
+                    self.body = self.body.replace("保留旧接口", "删除旧接口")
+                    self.save()
+                    self.assertFalse(self.gate()["ready"])
+
+    def test_unclosed_fence_uses_conservative_intent(self):
+        self.body = "## 下一步\n```\n未闭合的代码块\n## 当前决定\n保留旧接口。\n"
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+        self.body = self.body.replace("保留旧接口", "删除旧接口")
+        self.save()
+        self.assertFalse(self.gate()["ready"])
+
+    def test_list_continuation_fence_uses_conservative_intent(self):
+        self.body = ("## 候选想法\n- 示例\n  ```markdown\n  列表内代码\n\n"
+                     "## 验收标准\n保留旧接口。\n\n```python\nexample\n```\n")
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+        self.body = self.body.replace("保留旧接口", "删除旧接口")
+        self.save()
+        self.assertFalse(self.gate()["ready"])
+
+    def test_effective_heading_after_candidate_section_invalidates(self):
+        for heading in ("## 当前决定", "   ## 当前决定 ##", "# 新阶段"):
+            with self.subTest(heading=heading):
+                self.body = "## 候选想法\n未确定。\n" + heading + "\n保留旧接口。\n"
+                self.save()
+                self.assertTrue(self.verify()["ready"])
+                self.body = self.body.replace("保留旧接口", "删除旧接口")
+                self.save()
+                self.assertFalse(self.gate()["ready"])
+
+    def test_only_dedicated_candidates_preserve_evidence(self):
+        self.body = ("## 本轮目标\n维持行为。\n## 当前决定\n有效：保留接口。\n"
+                     "## 候选想法\n也许增加导出。\n## 验收标准\n现有检查通过。\n")
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+        self.body = self.body.replace("也许增加导出", "也许增加搜索")
+        self.save()
+        self.assertTrue(self.gate()["ready"])
+        self.body = self.body.replace("有效：保留接口。", "有效：保留接口。\n候选：增加导出。")
+        self.save()
+        self.assertFalse(self.gate()["ready"])
+        self.assertTrue(self.verify()["ready"])
+        self.body = self.body.replace("候选：增加导出。", "有效：增加搜索。")
+        self.save()
+        self.assertFalse(self.gate()["ready"])
+
+    def test_content_freshness_reuses_checks_across_git_only_changes(self):
+        subprocess.run(["git", "init", "-q", "-b", "codex/test", str(self.root)], check=True)
+        self.meta["verification"]["freshness"] = "content"
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+        original = workflow.read_evidence(self.root)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                        "commit", "--allow-empty", "-qm", "Metadata only"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "switch", "-qc", "codex/other"], check=True)
+        self.assertTrue(self.gate()["ready"])
+        self.assertEqual(workflow.read_evidence(self.root), original)
+        (self.root / "src/logic.py").write_text("value = 2\n")
+        self.assertFalse(self.gate()["ready"])
+
+    def test_git_dependent_checks_stay_strict(self):
+        for mode in (None, "git"):
+            with self.subTest(mode=mode):
+                if mode is None:
+                    self.meta["verification"].pop("freshness", None)
+                else:
+                    self.meta["verification"]["freshness"] = mode
+                self.save()
+                with patch.object(workflow, "identity", return_value={"root": str(self.root), "head": "one", "branch": "main"}):
+                    self.assertTrue(self.verify()["ready"])
+                with patch.object(workflow, "identity", return_value={"root": str(self.root), "head": "two", "branch": "main"}):
+                    self.assertFalse(self.gate()["ready"])
+
+    def test_content_freshness_still_binds_root_environment_goal_and_plan(self):
+        self.meta["verification"]["freshness"] = "content"
+        self.save()
+        for field, value in (("root", str(self.base)), ("head", "other")):
+            self.assertTrue(self.verify()["ready"])
+            report = workflow.read_evidence(self.root)
+            report["identity"][field] = value
+            workflow.write_json(workflow.evidence_path(self.root), report)
+            self.assertEqual(self.gate()["ready"], field == "head")
+        for mutate in (
+            lambda: self.meta.update(environment="new runtime"),
+            lambda: self.meta.update(goal_revision=2),
+            lambda: self.meta["verification"].update(freshness="git"),
+        ):
+            self.assertTrue(self.verify()["ready"])
+            mutate()
+            self.save()
+            self.assertFalse(self.gate()["ready"])
+
+    def test_git_changes_during_run_follow_declared_freshness(self):
+        first = {"root": str(self.root), "head": "one", "branch": "main"}
+        second = {**first, "head": "two"}
+        for mode in ("content", "git"):
+            with self.subTest(mode=mode):
+                self.meta["verification"]["freshness"] = mode
+                self.save()
+                with patch.object(workflow, "identity", side_effect=[first, second, second]):
+                    self.assertEqual(self.verify()["ready"], mode == "content")
+
     def test_git_identity_changes_invalidate(self):
         subprocess.run(["git", "init", "-q", "-b", "codex/test", str(self.root)], check=True)
         self.assertTrue(self.verify()["ready"])
@@ -272,7 +431,8 @@ class EvidenceTests(ProjectFixture):
             self.meta[field] = old
         self.save()
         original = json.loads(json.dumps(self.meta))
-        for change in ({"inputs": "src"}, {"checks": {}}, {"level": []}, {"reason": ""}):
+        for change in ({"inputs": "src"}, {"checks": {}}, {"level": []}, {"reason": ""},
+                       {"freshness": "unknown"}, {"freshness": []}):
             meta = json.loads(json.dumps(original))
             meta["verification"].update(change)
             with self.subTest(change=change), self.assertRaises(workflow.WorkflowError):

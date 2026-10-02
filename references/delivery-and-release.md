@@ -8,7 +8,7 @@
 
 ## Execute the first-release contract
 
-Use the accepted first-release contract in the current project record. If it is missing, consult the readiness section of [new-project.md](new-project.md) to resolve the actual gap; do not reopen settled decisions. Make that complete value loop the next release candidate. Keep it proportional: recovery covers credible blocking failures rather than every theoretical edge case, and the intended result is what the user actually needs. Revise the contract when evidence changes the decision, and record the reason.
+Use the accepted first-release contract and delivery target in the current project record. If missing, consult the readiness section of [new-project.md](new-project.md) to resolve the actual gap; do not reopen settled decisions. Make that complete value loop the next release candidate. Recovery covers credible blocking failures; the result is what the user actually needs. Revise the contract when evidence changes the decision, and record the reason.
 
 Finish this releasable loop before expanding the product surface. Do not spread implementation across multiple unfinished workflows, and do not let optional features displace release-candidate completion.
 
@@ -27,7 +27,7 @@ For a new repository, add only what the first release needs. Typical decisions i
 - license choice when distributing externally, explicitly decided rather than assumed;
 - release or deployment path.
 
-Do not publish or push until the user authorizes the exact external action.
+Publish or push only within current authorization.
 
 ## Thin vertical slices
 
@@ -63,18 +63,13 @@ Do not call the project ready while relevant tests fail, output is truncated, or
 
 ## Release candidate
 
-Create and pass the release candidate for the first-release contract before polishing or adding optional features. Verify from a clean user perspective:
+Verify the complete value loop against the agreed delivery target before optional polish or expansion. From a clean user perspective, check setup, core task completion, credible failure recovery, and output quality, including export when required. Add only the checks implied by the delivery target:
 
-- acquisition or installation;
-- first-run setup;
-- core task completion;
-- error recovery;
-- output quality and export;
-- update or rollback path;
-- support and feedback route;
-- analytics only when justified and disclosed.
+- **Local use:** verify the documented run command and required local inputs. Packaging or deployment is not a completion condition.
+- **Packaged distribution:** verify packaging, platform-required signing and permissions, and installation in a clean environment.
+- **Deployed service:** verify deployment, environment configuration, access, health, logs, and rollback against the actual deployed service.
 
-For packaged desktop or mobile applications, verify signing, permissions, packaging, and installation on a clean environment as applicable. For web services, verify deployment, environment variables, health, logs, and rollback.
+For distribution or deployment, check the applicable update or rollback path and support/feedback route. Include analytics only when justified and disclosed. Report local, packaged, and deployed evidence separately; one does not prove another.
 
 ## GitHub and launch
 

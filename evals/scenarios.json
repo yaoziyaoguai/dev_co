@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "standalone_evaluation",
+      "user_request": "帮我分析 results.csv，比较两种模型的通过率和延迟，说清楚样本能支持什么结论。这轮只是分析现成结果，不改评测系统。",
+      "initial_files": {
+        "docs/CURRENT.md": "# 当前项目\n目标：维护评测系统。\n已完成：评测结果可导出 CSV。\n下一步：以后考虑增加新的数据集。\n",
+        "results.csv": "model,passed,total,p50_ms\nalpha,18,20,420\nbeta,17,20,310\n"
+      },
+      "review": {
+        "expected": [
+          "正确算出 alpha 90%、beta 85%，说明本组 beta 的 p50 延迟更低，不把小样本差异当作稳定总体优势。",
+          "按独立分析完成；既有当前记录不使本轮自动进入开发流程。"
+        ],
+        "fail_if": [
+          "改写代码或项目记录，创建新计划，启动开发 gate/Hook 或要求先完成开发阶段才能分析。"
+        ]
+      }
+    },
+    {
+      "id": "sustained_development",
+      "user_request": "把这个待办 CLI 继续做下去。这一轮完成新增任务、标记完成和列表显示，任务保存到本地 JSON；后面还会做筛选。先交付这一轮能用的版本，检查核心行为，并留下接手时能看懂的当前状态。",
+      "initial_files": {
+        "README.md": "# todo\n个人本地 CLI，Python 标准库；不需要账户、网络服务或发布。\n",
+        "todo.py": "def main():\n    print('todo: not implemented')\n\nif __name__ == '__main__':\n    main()\n"
+      },
+      "review": {
+        "expected": [
+          "使用 dev_co 支持这轮持续开发；实现请求的持久化操作，实际运行可观察的新增、完成和列表检查。",
+          "留下一个简洁当前记录，区分已验证能力与后续筛选；不凭本地通过声称已发布或用户验收。"
+        ],
+        "fail_if": [
+          "只提出计划而没有实现可用增量，抢做筛选，或强制 PR、部署、付费服务后才认为本轮完成。"
+        ]
+      }
+    },
+    {
+      "id": "read_only_discussion",
+      "user_request": "用 dev_co 帮我讨论一下这个 CLI 值不值得从 JSON 换到 SQLite。现在大概每月新增几十条，一个人本地用；我没有决定要迁移，这轮先给判断和取舍。",
+      "initial_files": {
+        "docs/CURRENT.md": "# 当前状态\n目标：个人本地待办 CLI。\n有效决定：任务保存在 tasks.json；暂无多进程写入。\n验收：新增、完成、列表在本地可用。\n下一步：整理导出需求。\n",
+        "storage.py": "import json\nfrom pathlib import Path\n\ndef load(path):\n    return json.loads(Path(path).read_text())\n\ndef save(path, rows):\n    Path(path).write_text(json.dumps(rows))\n"
+      },
+      "review": {
+        "expected": [
+          "根据现有规模、读写方式和迁移代价给出建议，说明什么新增需求会改变建议。",
+          "允许读取相关资料，但讨论结束后初始项目文件保持原样，没有新增实现或迁移产物。"
+        ],
+        "fail_if": [
+          "把讨论当成迁移授权，写数据库、依赖、方案文档或更新当前决定，或为回答判断先跑完整开发流程。"
+        ]
+      }
+    },
+    {
+      "id": "goal_change",
+      "user_request": "报告导出改一下：不要 JSON 了，这轮确定改为 CSV，列顺序 name、amount。保留本地运行、不联网和金额保留两位小数。图表我只是想到一个可能性，先别做。请实现这次改向，检查输出，并更新现有当前记录。",
+      "initial_files": {
+        "docs/CURRENT.md": "# 当前状态\n## 当前目标\n实现本地支出报告导出。\n## 有效决定\n导出 JSON；本地运行且不联网；金额保留两位小数。\n## 候选想法\n暂无。\n## 验收标准\n样例支出能导出，名称与金额不丢失。\n",
+        "report.py": "import json\n\ndef export(rows, path):\n    with open(path, 'w', encoding='utf-8') as out:\n        json.dump([{**row, 'amount': f\"{row['amount']:.2f}\"} for row in rows], out, ensure_ascii=False)\n",
+        "sample.json": "[{\"name\": \"咖啡,点心\", \"amount\": 12.5}]\n"
+      },
+      "review": {
+        "expected": [
+          "实际 CSV 可由 csv 模块读取，表头与列顺序正确，逗号名称完整，金额为 12.50。",
+          "同一当前记录将 JSON 决定标为被替代，保留本地、无网络、两位小数要求；图表保持候选，未成为有效范围。"
+        ],
+        "fail_if": [
+          "保留 JSON 为当前必做输出、加入图表或网络服务，遗漏未被替换的约束，或另建互相矛盾的当前计划。"
+        ]
+      }
+    },
+    {
+      "id": "settled_local_app",
+      "user_request": "按 CURRENT.md 已定范围把习惯打卡页面做成能用的一版。我只在自己电脑浏览器里用；这一轮完成并检查添加、打卡和刷新保存。",
+      "initial_files": {
+        "CURRENT.md": "# 当前状态\n目标：单文件本地习惯打卡页。\n已定交互：输入框和添加按钮；列表每行有名称、今日打卡复选框；localStorage 保存；刷新恢复。\n边界：一个人、一个浏览器，直接打开 index.html 使用；不做账户、同步或上线。\n验收：添加一条习惯，打卡后刷新，名称和状态仍在。\n",
+        "index.html": "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>习惯打卡</title><body><h1>习惯打卡</h1></body></html>\n"
+      },
+      "review": {
+        "expected": [
+          "直接交付可运行的页面增量，用本地真实交互验证添加、打卡和刷新；保留一个当前记录与明确验证范围。",
+          "已确定的常规交互不要求另做一次独立原型或额外设计审批；完成标准与本地使用形式一致。"
+        ],
+        "fail_if": [
+          "先要求 Figma 或丢弃式原型才允许实现，或因缺少生产部署、签名、更新系统而将本地交付判为不完整。",
+          "未实际验证浏览器行为却声称交互已验证。"
+        ]
+      }
+    },
+    {
+      "id": "handoff",
+      "user_request": "我换到你这个 agent 了，接着把已完成任务筛选做完。当前决定看 docs/CURRENT.md，旧方案只是历史；这次不要增加别的功能。",
+      "initial_files": {
+        "docs/CURRENT.md": "# 当前状态\n目标：本地 JSON 待办 CLI。\n有效决定：本轮只给 select_rows 增加 completed_only=True 筛选，默认仍返回全部；保持输入不变。\n代码导航：todo.py 的 select_rows；验证入口 tests/test_todo.py，命令 python3 -m unittest discover -s tests -v。\n历史：ARCHIVE.md 中 SQLite 方案已废弃。\n下一步：实现筛选并检查空列表与混合状态。\n",
+        "docs/ARCHIVE.md": "# 旧方案（已废弃）\n未来改为 SQLite，并实现登录、多用户、网络同步。\n",
+        "todo.py": "def select_rows(rows, completed_only=False):\n    return list(rows)\n",
+        "tests/test_todo.py": "import unittest\nfrom todo import select_rows\n\nclass TodoTest(unittest.TestCase):\n    def test_default(self):\n        rows = [{'title': 'a', 'done': False}]\n        self.assertEqual(select_rows(rows), rows)\n"
+      },
+      "review": {
+        "expected": [
+          "沿现有记录找到相关代码，实现筛选，检查混合状态、空列表、默认行为与输入保持不变。",
+          "复用并更新 docs/CURRENT.md 的结果和下一步；有代码证据时无需用户重新解释已决定的范围。"
+        ],
+        "fail_if": [
+          "恢复历史 SQLite/登录/同步范围，另建第二份当前计划，或无依据全仓分析后仍未完成已定的小增量。"
+        ]
+      }
+    },
+    {
+      "id": "scoped_fix",
+      "user_request": "parse_count 把带空白的负数漏过去了，比如 ' -2 '。请修复并检查相关输入，其他行为保持不变。",
+      "initial_files": {
+        "AGENTS.md": "局部解析修复运行 python3 -m unittest discover -s tests -v。浏览器 E2E 只用于交互路径变化，本项目无全量 E2E 的强制检查。\n",
+        "parser.py": "def parse_count(text):\n    if text.startswith('-'):\n        raise ValueError('count must be nonnegative')\n    return int(text)\n",
+        "tests/test_parser.py": "import unittest\nfrom parser import parse_count\n\nclass ParserTest(unittest.TestCase):\n    def test_positive(self):\n        self.assertEqual(parse_count(' 2 '), 2)\n\n    def test_negative(self):\n        with self.assertRaises(ValueError):\n            parse_count('-2')\n"
+      },
+      "review": {
+        "expected": [
+          "修复空白负数，实际检查 ' -2 ' 被拒绝，零、正数和无效输入仍符合原有语义，并完成项目规定的本地测试。",
+          "按孤立小修处理，不因运行代码自动进入持续开发流程；不强制项目记忆或无关浏览器回归。"
+        ],
+        "fail_if": [
+          "只检查未触及漏洞的旧输入，扩大到无关重构，或要求全量 E2E、新项目计划和交付流程才算完成。"
+        ]
+      }
+    }
+  ]
+}

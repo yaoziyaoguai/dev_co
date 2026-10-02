@@ -8,7 +8,7 @@
 
 Python 3.10+ 标准库，支持 macOS/Linux 的本地进程管理。命令中的 `$SKILL_ROOT` 表示当前 `SKILL.md` 所在的**实际绝对目录**，使用前将其设为已发现路径；`$PROJECT_ROOT` 同样指实际项目根目录。不需要安装依赖或读取凭据。
 
-原名 `start-software-project` 的项目记录仍可读取；新建记录使用 `workflow: dev_co`。不需要为了技能改名重建项目文档或重跑仍然有效的验证。
+原名 `start-software-project` 的项目记录仍可读取；新建记录使用 `workflow: dev_co`。不需要为了技能改名重建项目文档。此次意图解析修复会使旧算法生成的证据失效一次，按原有相关检查重新验证；无需因此扩大检查范围。
 
 ## 先接入已有记录
 
@@ -32,6 +32,7 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" init --root "$PROJECT_ROOT" --
   "verification": {
     "level": "targeted",
     "reason": "只改 CSV 导入及其调用方契约。",
+    "freshness": "content",
     "inputs": ["src/importer", "tests/test_importer.py", "pyproject.toml"],
     "checks": [
       {
@@ -62,9 +63,16 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" gate --root "$PROJECT_ROOT"
 
 `brief` 输出有界摘要、代码导航及当前 Git 状态；不是源码事实认证。`verify` 按 checks 顺序实际执行 argv，不启用 shell 字符串；写出退出码、超时、日志和输入指纹。`gate` 仅核对证据，不运行测试。退出码：0 表示所选自动检查的当前证据满足；1 表示缺失、失败或过期；2 表示配置、运行或读取错误。init/brief 的 0 仅表示该命令成功。
 
-证据位于 `.project-workflow/evidence/<run-id>/` 和 `latest.json`，关联项目路径、分支/HEAD、声明的相关文件内容、当前意图、检查计划、环境标签与日志。即使未提交也检测声明输入的变化；运行中输入变动使结果失效。每次新执行先让旧通过记录失效，防止异常时回退成“已通过”。`verify.lock/owner.json` 记录运行进程；遇到遗留锁先核对进程，再清理确认已结束的本任务锁，不能自动删锁并行重跑。
+证据位于 `.project-workflow/evidence/<run-id>/` 和 `latest.json`，保存项目路径、执行时的分支/HEAD、声明文件内容、当前意图、检查计划、环境标签与日志。`verification.freshness` 决定 Git 信息是否影响证据复用：
 
-正文中的 `## 最近验证`、`## 下一步`、`## 接手记录` 不参与意图指纹，方便更新操作状态；**目标、验收与重要决定必须写在各自段落，不能只塞进这些被排除的段落**。其余正文变化也会使证据保守失效。phase/status 是流程标签，不能用改成 done 代替验证。
+- `content`：适用于只依赖声明文件和环境的检查。空提交或仅换分支不使证据失效，报告仍保留实际验证时的 Git 来源，不冒充在新提交上重新执行。
+- `git`：检查读取版本号、提交历史或分支行为时使用；HEAD 或分支变化也会使证据失效。
+
+`init` 新记录显式使用 `content`；配置检查时确认相关依赖均已声明，涉及 Git 就改为 `git`。已有记录省略该字段仍按 `git` 处理；切换模式改变计划，需重新验证，不能直接沿用旧结果。两个模式都绑定项目根、声明输入、意图、计划、环境和日志。
+
+未提交的输入变化同样会被检测；运行中上述依赖变化使结果失效。每次新执行先让旧通过记录失效，防止异常时回退成“已通过”。`verify.lock/owner.json` 记录运行进程；遇到遗留锁先核对进程，再清理确认已结束的本任务锁，不能自动删锁并行重跑。
+
+正文中独立的二级段落 `## 最近验证`、`## 下一步`、`## 接手记录`、`## 候选想法` 不参与意图指纹，范围到下一个 `#` 或 `##` 标题；顶层反引号/波浪号围栏中的标题不切换段落。缩进、列表或引用中的开围栏，以及未闭合围栏，会保守地将整篇正文纳入指纹，不尝试完整 Markdown 容器解析。**目标、验收与有效决定必须写在各自段落，不能只塞进被排除的段落**。候选被采纳时移入目标、决定或验收，必要时递增 goal_revision。写在其他段落里的“候选”字样不会被自动排除，其余正文变化仍使证据保守失效。phase/status 是流程标签，不能用改成 done 代替验证。
 
 脚本忽略常见缓存、生成证据和敏感文件名，并拒绝越界路径；这不是通用秘密检测器。`cost: local` 是配置声明，**不是网络沙箱**：argv 中的任意程序仍可能访问网络或写文件。执行前检查命令，只有符合当前授权的本地检查才用 verify。日志不自动脱敏；不要把敏感输出送入它。
 
@@ -73,17 +81,19 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" gate --root "$PROJECT_ROOT"
 ## Hook：先生成可审阅配置
 
 ```sh
-python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host codex --print-config
-python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host claude --print-config
+python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host codex --root "$PROJECT_ROOT" --print-config
+python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host claude --root "$PROJECT_ROOT" --print-config
 ```
 
 按需加 `--state docs/PROJECT.md`。输出只是配置片段，**不会安装或启用**。保留宿主原有 hooks，仅合并用户选择的部分，推荐先在单一试用项目启用：
+
+`--root` 与验证 CLI 选择同一个项目根：状态路径、inputs 和证据都相对它解释。生成时将根固化为绝对路径，相对路径按命令进程当前目录解析。子项目必须显式指定自己的根，否则兼容旧配置，按事件 cwd 寻找 Git 顶层。显式根不存在或不是目录时报错；根存在但缺少记录时不回退到父项目。固定根的配置只用于对应项目，不作为全局通用配置。
 
 启用前先用 `brief` 确认当前记录已经接入且内容正确。只有普通 Markdown、尚无上述 frontmatter 的记录仍能人工接手，但默认 SessionStart/Stop 不会识别它；应就地接入并保留原文，或明确继续采用人工记录。不能只放入配置就告诉用户“自动记忆已经生效”。
 
 - Codex：使用当前版本支持的项目 `.codex/hooks.json`/活动配置层；按 `/hooks` 审阅并信任确切定义，改变定义后重新信任。禁止用绕过信任的选项。
 - Claude Code：合并到项目 `.claude/settings.json` 的 hooks；通过 `/hooks` 检查，按该版本要求重新载入会话。
-- 配置使用生成时 Python 和脚本的绝对路径，换机器或移动技能后需要重新生成。
+- 配置使用生成时 Python、脚本及显式项目根的绝对路径，换机器、移动技能或项目后需要重新生成。
 
 行为：
 
