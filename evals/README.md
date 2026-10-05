@@ -4,6 +4,8 @@
 
 修改触发范围时选跑 `standalone_evaluation`、`sustained_development`；修改记忆规则时选跑 `goal_change`、`handoff`；修改流程或验证要求时选跑 `read_only_discussion`、`settled_local_app`、`scoped_fix`。一次结果只能说明该宿主、模型和技能版本在这个场景中的表现。
 
+修改界面指南时选跑 `ui_read_only_discussion`、`ui_filtered_empty`，分别检查只读设计判断和真实状态恢复；涉及加载边界时再选 `sustained_development`、`scoped_fix`。界面场景需区分源码建议、实际视觉和交互证据，缺少浏览器不能记为实际交互通过。
+
 ## 怎样运行
 
 1. 使用临时目录或一次性副本，每个场景单独初始化。把 `initial_files` 写成对应的相对路径；可做一次本地 Git 基线，便于查看差异。不要挂载真实项目、凭据或私人会话。

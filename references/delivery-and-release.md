@@ -59,6 +59,8 @@ Apply review proportional to risk. Check:
 - migration and rollback for persistent data;
 - documentation and operator visibility.
 
+For changes to UI hierarchy, density, states, or responsive behavior, use [UI design and verification](ui-design.md) on the affected surface. Reuse existing design decisions and inspect actual rendering and the relevant task; a local style fix does not require a full design audit. Report visual and behavioral evidence separately when either is unverified.
+
 Do not call the project ready while relevant tests fail, output is truncated, or only a demo path was checked.
 
 ## Release candidate

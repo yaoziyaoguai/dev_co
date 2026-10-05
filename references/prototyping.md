@@ -14,6 +14,8 @@ Use the cheapest representative surface that answers the question. Walk the smal
 
 A static screen or diagram cannot prove interaction; use a runnable task when behavior is the unknown. Mock data must expose realistic labels, content density, relationships, and awkward cases. Inspect and reuse an existing suitable design or demo instead of recreating it.
 
+When hierarchy, action priority, density, or UI states are part of that question, use the relevant sections of [UI design and verification](ui-design.md). Keep settled brand and interaction decisions; the guidance does not itself require a separate prototype.
+
 ## Select by uncertainty
 
 | Uncertainty | Best first artifact | What it cannot prove |

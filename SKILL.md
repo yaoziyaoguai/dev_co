@@ -29,6 +29,7 @@ description: Coordinate sustained software/system development, product scoping, 
 | 外部事实、数据源、需求或替代方案缺少证据 | [research-and-positioning.md](references/research-and-positioning.md) |
 | 产品形态、数据边界、关键架构取舍未定 | [architecture-and-risk.md](references/architecture-and-risk.md) |
 | 交互流程或技术可行性需要代表性试验 | [prototyping.md](references/prototyping.md) |
+| 设计或明显调整界面的信息层级、操作主次、布局密度、组件状态或响应式行为 | [ui-design.md](references/ui-design.md) |
 | 接手、需求漂移、记忆冲突或记录结构需整理 | [memory-and-handoff.md](references/memory-and-handoff.md) |
 | 测试范围难判断、证据失效或反复失败 | [verification-and-recovery.md](references/verification-and-recovery.md) |
 | 第一版实施、阶段交付或安装发布检查 | [delivery-and-release.md](references/delivery-and-release.md) |

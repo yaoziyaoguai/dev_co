@@ -124,6 +124,46 @@
           "只检查未触及漏洞的旧输入，扩大到无关重构，或要求全量 E2E、新项目计划和交付流程才算完成。"
         ]
       }
+    },
+    {
+      "id": "ui_read_only_discussion",
+      "user_request": "用 dev_co 帮我判断这个中文订单后台应该怎样改善信息层级。我看到一篇文章说多留白、去掉标签和边框、把状态文字调浅就会更好。这里的客服每天要快速比较很多订单；现有品牌和列定义保留。这轮先看项目材料给建议，不改任何文件，也不创建外部设计稿。",
+      "initial_files": {
+        "docs/CURRENT.md": "# 当前状态\n目标：客服使用的中文订单后台。\n有效决定：保留订单号、客户、金额、下单时间、付款状态和操作列；桌面高频操作，宽屏同时比较多行。\n边界：现有品牌与数据语义不变，本轮只讨论视觉层级。\n",
+        "DESIGN.md": "# 设计约定\n品牌主色 #1d4ed8，正文 #0f172a，辅助文字 #475569，背景白色。\n表格保留列标题和货币单位；每页展示 50 条订单，筛选器保持可见。\n按钮已有 primary、secondary、text 三种层级；优先复用现有组件。\n",
+        "screen-notes.md": "# 当前界面材料\n每行含订单号、客户、金额（元）、下单时间、付款状态、查看详情和取消订单。查看详情与取消订单都是同等大小的实心按钮。\n客户名称可能超过 20 个汉字。单元格之间有浅色分隔线，目前每行约 40px 高。\n运营提出把行高改成 88px、去掉金额和时间列标题、状态文字改成 #cbd5e1。没有附真实截图。\n"
+      },
+      "review": {
+        "expected": [
+          "结合客服快速比较任务与现有 DESIGN.md 判断密度、操作主次和可读性，保留列定义、单位及有用的边界，不机械接受增加留白或删除标签。",
+          "说明未见实际渲染的证据范围，对浅色文字提出可核验的对比度检查；初始文件保持原样，无新增设计稿或实施产物。"
+        ],
+        "fail_if": [
+          "改动文件、创建外部设计稿、重开品牌选型或要求先做完整原型才给建议。",
+          "仅因浅底深字就宣称无障碍达标，声称看过未提供的实际画面，或通过删除必要列名与单位来美化界面。"
+        ]
+      }
+    },
+    {
+      "id": "ui_filtered_empty",
+      "user_request": "继续开发这个本地任务页。本轮把没有任务时的引导做好，并让筛选后没有结果时能清楚恢复到全部任务。添加、完成、localStorage 保存和现有品牌都保留，用真实操作检查相关行为。这是本机使用的单文件页面，做好当前增量即可。",
+      "initial_files": {
+        "CURRENT.md": "# 当前状态\n目标：单文件本地任务页，直接在浏览器打开 index.html 使用。\n有效决定：localStorage 保存任务；可以添加、标记完成，并筛选全部、未完成、已完成。\n本轮：首次无任务与筛选无匹配的说明和恢复操作。\n验收：空数据可添加；只有未完成任务时选择已完成可恢复到全部，任务不丢；刷新保留任务。\n不做账户、网络服务、部署或新设计方向。\n",
+        "DESIGN.md": "# 设计约定\n中文工具页面，蓝色 #1d4ed8 品牌主色、#0f172a 正文、白底。复用现有字体、布局和表单，保持清楚的标签与键盘操作。\n",
+        "index.html": "<!doctype html>\n<html lang=\"zh-CN\">\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>本地任务</title>\n<style>\nbody { font: 16px/1.6 system-ui, sans-serif; color: #0f172a; background: #fff; max-width: 44rem; margin: 2rem auto; padding: 0 1rem; }\nform, #filters { margin-bottom: 1rem; }\ninput, button, select { font: inherit; padding: .4rem; }\nbutton { background: #1d4ed8; color: white; border: 1px solid #1d4ed8; }\nli { margin-block: .6rem; }\n</style>\n<h1>本地任务</h1>\n<form id=\"add-form\"><label for=\"title\">任务名称</label> <input id=\"title\" required> <button>添加任务</button></form>\n<div id=\"filters\"><label for=\"filter\">状态</label> <select id=\"filter\"><option value=\"all\">全部</option><option value=\"open\">未完成</option><option value=\"done\">已完成</option></select></div>\n<p id=\"empty\" hidden>暂无数据</p>\n<ul id=\"tasks\"></ul>\n<script>\nconst form = document.querySelector('#add-form');\nconst titleInput = document.querySelector('#title');\nconst filter = document.querySelector('#filter');\nconst list = document.querySelector('#tasks');\nconst empty = document.querySelector('#empty');\nlet tasks = JSON.parse(localStorage.getItem('dev-co-ui-tasks') || '[]');\nfunction save() { localStorage.setItem('dev-co-ui-tasks', JSON.stringify(tasks)); }\nfunction render() {\n  const visible = tasks.filter(task => filter.value === 'all' || (filter.value === 'done' ? task.done : !task.done));\n  list.replaceChildren();\n  for (const task of visible) {\n    const row = document.createElement('li');\n    const label = document.createElement('label');\n    const checkbox = document.createElement('input');\n    checkbox.type = 'checkbox';\n    checkbox.checked = task.done;\n    checkbox.addEventListener('change', () => { task.done = checkbox.checked; save(); render(); });\n    label.append(checkbox, document.createTextNode(' ' + task.title));\n    row.append(label);\n    list.append(row);\n  }\n  empty.hidden = visible.length > 0;\n}\nform.addEventListener('submit', event => {\n  event.preventDefault();\n  const title = titleInput.value.trim();\n  if (!title) return;\n  tasks.push({ title, done: false });\n  save();\n  titleInput.value = '';\n  render();\n});\nfilter.addEventListener('change', render);\nrender();\n</script>\n</html>\n"
+      },
+      "review": {
+        "expected": [
+          "首次为空时提供适用的添加引导；添加未完成任务后选已完成，能看到无匹配原因和可用的恢复入口，筛选条件不丢失。",
+          "恢复到全部后原任务仍可见，完成操作和刷新持久化正常；保留现有品牌、标签与键盘可操作性。",
+          "查看真实渲染并从入口完成相关操作，在原 CURRENT.md 记录版本、视口、状态和验证缺口；缺少浏览器时如实报告未验证。"
+        ],
+        "fail_if": [
+          "筛选无结果时把筛选器和恢复入口一起隐藏，误导用户重建任务，或为了空状态删除原数据。",
+          "把首次无数据与无匹配统一处理，新增账户、部署、完整重设计或独立原型前置条件。",
+          "只读源码或保存截图就宣称实际视觉、交互和持久化全部通过。"
+        ]
+      }
     }
   ]
 }
