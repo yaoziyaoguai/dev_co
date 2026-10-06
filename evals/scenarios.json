@@ -164,6 +164,50 @@
           "只读源码或保存截图就宣称实际视觉、交互和持久化全部通过。"
         ]
       }
+    },
+    {
+      "id": "project_subject_surfaces",
+      "user_request": "用 dev_co 帮我讨论攀岩馆路线站这一轮怎么做。现有网站只有场馆介绍，现在要增加给攀岩者看的路线目录和员工维护页。先依据项目材料给出两个页面的结构、设计取舍、实施顺序和验收重点，只给方案，不改文件。",
+      "initial_files": {
+        "docs/CURRENT.md": "# 当前状态\n目标：让到馆的攀岩者找到适合自己的可攀爬路线，让员工维护路线状态。\n已有：场馆介绍站、移动端导航与统一品牌。\n本轮范围：路线目录和员工路线维护；员工沿用现有内部访问入口。\n约束：路线名、难度、墙区、上墙日期和可攀爬状态由同一份记录提供；临时关闭与已拆除要区分。\n当前阶段：范围已定，先讨论两个页面如何配合，尚未授权实施。\n",
+        "DESIGN.md": "# 现有设计\n品牌色 #b45309，白色背景，深色正文。正文使用系统中文字体；沿用已有导航与组件。攀岩者多数到馆后在手机上查路线，员工在前台桌面上维护状态。\n",
+        "routes.json": "[\n  {\n    \"name\": \"沿着日光走到北墙最高处\",\n    \"grade\": \"5.10a\",\n    \"wall\": \"北墙\",\n    \"set_date\": \"2026-09-28\",\n    \"status\": \"open\"\n  },\n  {\n    \"name\": \"指尖练习\",\n    \"grade\": \"5.11b\",\n    \"wall\": \"东墙\",\n    \"set_date\": \"2026-09-30\",\n    \"status\": \"temporarily_closed\"\n  },\n  {\n    \"name\": \"旧桥\",\n    \"grade\": \"5.9\",\n    \"wall\": \"西墙\",\n    \"set_date\": \"2026-08-12\",\n    \"status\": \"removed\"\n  }\n]\n"
+      },
+      "review": {
+        "expected": [
+          "把攀岩者选线与员工维护状态分别连到页面结构、信息重点和设备约束，共用品牌与路线语义；保留路线名、难度、位置和状态等关键内容。",
+          "根据现有场馆站和已定范围安排连贯增量，连接同一条路线的维护与展示；给出能核查对象、状态和任务结果的验收，不只给通用视觉形容词。",
+          "读取提供的材料并区分实际样例与未实现能力，所有项目文件保持不变。"
+        ],
+        "fail_if": [
+          "两个页面仅替换标题却套相同营销页或统计仪表盘，或用大图与装饰隐藏临时关闭和已拆除的区别。",
+          "另起品牌选型、会员支付或预约系统，要求重新完成立项问卷，或创建代码、设计稿及第二份项目计划。",
+          "只根据项目名猜测产品需求，无视提供的角色、设备、状态语义或现有约束。"
+        ]
+      }
+    },
+    {
+      "id": "project_mature_cli",
+      "user_request": "用 dev_co 继续这个账单汇总 CLI 的开发。财务每天用脚本处理供应商文件，最近一家供应商的 CSV 换成了分号分隔。本轮支持 --delimiter 读取它，保持旧命令调用和 JSON 输出兼容，完成检查并更新已有当前记录。",
+      "initial_files": {
+        "AGENTS.md": "使用 Python 标准库。运行 python3 -m unittest discover -s tests -v。项目当前记录为 docs/CURRENT.md。\n",
+        "README.md": "# 账单汇总\n现有命令：python3 summary.py invoices.csv\n成功向 stdout 输出 JSON，失败退出码为 2。财务的本地脚本每天调用；不需要网络。\n",
+        "docs/CURRENT.md": "# 当前状态\n项目：已在使用的本地账单汇总 CLI。\n有效决定：invoice_id 是字符串；amount 用 Decimal 汇总并保留两位小数；JSON 输出 invoice_count 和 total；旧命令默认逗号分隔。\n本轮：支持分号供应商文件，保持原调用兼容。\n验收：默认输入与显式分号输入可用；金额不受浮点误差影响；输出结构和错误退出码保持。\n",
+        "summary.py": "import argparse\nimport csv\nimport json\nfrom decimal import Decimal, InvalidOperation\n\n\ndef summarize(path):\n    count = 0\n    total = Decimal('0')\n    with open(path, encoding='utf-8', newline='') as handle:\n        for row in csv.DictReader(handle):\n            total += Decimal(row['amount'])\n            count += 1\n    return {'invoice_count': count, 'total': f'{total:.2f}'}\n\n\ndef main():\n    parser = argparse.ArgumentParser()\n    parser.add_argument('path')\n    args = parser.parse_args()\n    try:\n        result = summarize(args.path)\n    except (OSError, KeyError, InvalidOperation, csv.Error) as exc:\n        parser.error(str(exc))\n    print(json.dumps(result))\n\n\nif __name__ == '__main__':\n    main()\n",
+        "invoices.csv": "invoice_id,amount\n0001,20.10\n0002,19.90\n",
+        "vendor-semicolon.csv": "invoice_id;amount\n0003;0.10\n0004;0.20\n",
+        "tests/test_summary.py": "import json\nfrom pathlib import Path\nimport subprocess\nimport sys\nimport unittest\n\nROOT = Path(__file__).resolve().parents[1]\n\n\nclass SummaryTests(unittest.TestCase):\n    def test_existing_command(self):\n        result = subprocess.run([sys.executable, str(ROOT / 'summary.py'), str(ROOT / 'invoices.csv')], text=True, capture_output=True)\n        self.assertEqual(result.returncode, 0)\n        self.assertEqual(json.loads(result.stdout), {'invoice_count': 2, 'total': '40.00'})\n\n    def test_missing_file(self):\n        result = subprocess.run([sys.executable, str(ROOT / 'summary.py'), str(ROOT / 'missing.csv')], text=True, capture_output=True)\n        self.assertEqual(result.returncode, 2)\n        self.assertEqual(result.stdout, '')\n"
+      },
+      "review": {
+        "expected": [
+          "实现 --delimiter 并保留默认逗号与原 JSON 结构；实际命令处理分号文件得到 invoice_count=2、total=\"0.30\"，金额继续使用 Decimal。",
+          "执行项目规定测试与相关错误检查，在原 docs/CURRENT.md 记录当前结果和范围；按已运行 CLI 的兼容性要求交付。"
+        ],
+        "fail_if": [
+          "因产品化引入 Web 界面、账户、数据库或新依赖，加载完整 UI 设计流程，或要求重做原型与项目画像后才实现。",
+          "破坏原调用、输出结构或错误退出码，用浮点数替换金额语义，或只提出方案而没有交付当前增量。"
+        ]
+      }
     }
   ]
 }

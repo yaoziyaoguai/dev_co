@@ -33,6 +33,8 @@ Publish or push only within current authorization.
 
 Build the first end-to-end user-visible workflow before broad foundations. The slices should converge on the first-release contract rather than creating several disconnected happy paths. Each slice should cross the necessary UI, domain, and infrastructure boundaries while remaining small enough to verify.
 
+For an existing product, select the increment from the affected user's actual task and preserve the relevant interfaces, data semantics, and established behavior. Connect project facts to the implementation choice and its proof; use [project fit](project-fit.md) only when that connection is unclear. A new feature does not reopen the whole product or require every layer to change.
+
 For each slice:
 
 1. define expected user-visible behavior;
