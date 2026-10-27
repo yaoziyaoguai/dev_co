@@ -8,6 +8,10 @@
 
 修改按项目取舍的指导时，选跑 `project_subject_surfaces` 与 `project_mature_cli`：前者检查同一产品的不同角色和界面是否有具体依据，后者检查已有非界面产品的兼容增量。判定依据是实际方案、动作与输出，不能只看是否复述“用户、对象、阶段”等词。
 
+修改专项技能导航时，选跑 `specialist_mysql_read_only` 和 `ui_read_only_discussion`，检查技术指导、UI职责与讨论边界；再用 `standalone_evaluation` 或 `scoped_fix` 检查导航没有扩大 dev_co 触发范围。只提供正常的可用技能目录，不提示应选择哪项；记录实际读取的技能及产物，缺少相关技能时区分可用性限制和路由错误。
+
+专项分流新增场景：`specialist_performance_bounded` 检查未定位瓶颈时保持诊断范围；`specialist_explicit_workflow_boundary` 检查整理增量不会启动工单发布或完整规划流程。只有实际运行并查看动作和产物后才能记为通过；JSON 校验和人工阅读不等同于行为评测。
+
 ## 怎样运行
 
 1. 使用临时目录或一次性副本，每个场景单独初始化。把 `initial_files` 写成对应的相对路径；可做一次本地 Git 基线，便于查看差异。不要挂载真实项目、凭据或私人会话。

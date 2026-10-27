@@ -67,6 +67,12 @@ PY
 
 安装后开启新会话。Codex 用 `$dev_co`，Claude Code 用 `/dev_co`。已有会话读过旧版时，需要重新读取技能。
 
+### 更新已安装版本
+
+按上述方式链接安装时，两个宿主读取同一份源码，更新仓库即可同步技能正文与参考文件。在源码目录先运行 `git status --short --branch`，确认工作树干净、当前分支跟踪上游 `main`，再运行 `git pull --ff-only`。有本地改动或分支分歧时先比较并保留自己的修改；更新不会自动覆盖全局 `AGENTS.md` / `CLAUDE.md` 或启用 Hook。使用复制安装时，需要自行同步对应副本。
+
+更新后开启新会话，或在已有会话重新读取发生变化的技能与参考文件；磁盘更新不代表已加载的上下文自动刷新。
+
 ## 先拿一个真实的小任务试用
 
 在 Codex 中可以这样开始；Claude Code 把 `$dev_co` 换成 `/dev_co`：
@@ -112,9 +118,10 @@ Codex 通常使用 `~/.codex/AGENTS.md`，Claude Code 使用 `~/.claude/CLAUDE.m
 - Choose `dev_co` by the current task's intent: load it for scoping a software/system product to build, sustained feature development, complex or multi-step repairs, and development recovery or handoff. Building or refactoring an evaluation system qualifies; verification of the current development increment stays within that workflow.
 - Do not auto-load `dev_co` for standalone evaluations, benchmarks or model comparisons, results analysis, reports or research, code questions or one-off reviews, throwaway scripts, or small isolated text/configuration/bug fixes. A software repository, code execution, a current-state file, or previous `dev_co` use is not sufficient. Follow applicable project requirements without starting this workflow. Honor explicit invocation, opt-out, and a user-selected primary workflow.
 - When applicable, load it before substantive development using the host's native skill-invocation tool, or read its installed `SKILL.md`. Resolve the catalog path, falling back to `~/.codex/skills/dev_co/SKILL.md` or `~/.claude/skills/dev_co/SKILL.md`; do not rely solely on implicit matching. Reuse loaded content, reloading only after changes or context loss; read references only as needed.
+- Respect every skill's explicit-only invocation policy. A reference from another skill or workflow does not authorize starting it; use the host's supported loader only after the user selects that workflow.
 ```
 
-权限和指令优先级仍由宿主决定。本技能内的 `lfg`、`review`、`qa` 只在用户明确选用时加载；安装 dev_co 不会修改其他技能自身的自动调用设置。已有技能存在冲突时，需要分别检查其入口和配置。
+权限和指令优先级仍由宿主决定。本技能内的 `lfg`、`review`、`qa` 和其他设为显式调用的技能只在用户明确选用时加载；安装 dev_co 不会修改其他技能自身的自动调用设置。已有技能存在冲突时，需要分别检查其入口和配置。
 
 </details>
 
@@ -141,6 +148,22 @@ docs/archive/           已完成阶段的长记录，可选
 TDD 适合行为已经清楚、可以先复现失败的改动。需求和接口还含糊时，先写清行为、边界和验收，采用 SDD 中先明确规格的做法；小任务几行就能说清，不必额外生成一套文档。这里没有强制的 TDD / SDD 流水线。
 
 “本地测试通过”“真实服务可用”“已经部署”“用户认可效果”分别报告。按影响选择检查的具体说明见[验证范围与失控恢复](references/verification-and-recovery.md)。
+
+## 已有专项技能怎样配合
+
+dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力。[专项技能导航](references/specialist-skills.md) 按问题列出选择条件与边界，例如：
+
+| 当前问题 | 选择方式 |
+| --- | --- |
+| UI 方向或整体设计需要改进 | `oil-ui`；具体配色、字体等参考用 `ui-ux-pro-max` |
+| 前后端或服务共享接口变化 | `contract-first` |
+| 不知道为什么慢 | 先诊断；多方案量化优化与性能回归检测分别选对应技能 |
+| 需要安全检查 | 区分差异审查、仓库审计与已知漏洞修复 |
+| 合并冲突、数据口径、代码图谱、Figma 或文档同步 | 查相应条目，沿用当前工具与授权；合并冲突不依赖专门技能 |
+
+只读当前需要的条目和技能，不要求把表中的技能全部安装。磁盘已安装、宿主可加载和依赖工具可用分别核实；有冲突的默认提交或无上限实验规则不能扩大本轮授权。单纯读取已有术语表不启动领域建模。
+
+专项技能仍独立维护，多个宿主可以复用用户级安装。dev_co 不复制它们的全文，也不自动安装插件、改变模型或增加权限。已有目标、授权和项目记录继续使用；专项报告与实验日志作为证据链接回来。小修改保持局部，独立评测或分析不会因为表里有相关技能就变成开发任务。`lfg`、`review`、`qa` 和用户设为显式调用的技能，仍需用户明确选用。
 
 ## 界面开发怎么检查
 
@@ -204,7 +227,7 @@ assets/                     封面及生成说明
 python3 -m unittest discover -s tests -v
 ```
 
-脚本测试覆盖记录兼容、证据失效与复用、失败与中断、进程清理、路径边界和子项目 Hook 事件适配。[行为评测场景](evals/README.md)用于检查 Agent 的实际动作和产物，修改相关规则时选跑，不加入每个用户项目的必跑流程。
+脚本测试覆盖记录兼容、证据失效与复用、失败与中断、进程清理、路径边界和子项目 Hook 事件适配。[行为评测场景](evals/README.md)用于检查 Agent 的实际动作和产物，修改相关规则时选跑，不加入每个用户项目的必跑流程。新增的专项路由场景覆盖 MySQL 只读建议、未定位瓶颈时的有界诊断，以及整理开发增量时不启动外部工单流程；它们是评测输入，新增场景或脚本测试通过均不代表这些 Agent 行为已经实测通过。
 
 曾在 Codex CLI 0.154.0、Claude Code 2.1.280 中做过有限场景试用，检查加载、接手和任务范围选择；这些结果不能证明所有模型、项目或长期协作都同样有效。Hook 的协议测试也不能代替宿主里的实际验证。
 

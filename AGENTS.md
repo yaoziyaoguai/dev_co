@@ -8,3 +8,4 @@ This repository is the source for the shared Codex / Claude Code skill.
 - Preserve evidence invalidation, process cleanup, and project-path boundaries. A passing gate must never grant permissions or imply deployment/user acceptance.
 - Installation must preserve existing user files and must not enable hooks or replace global instructions automatically.
 - Keep README installation and routing guidance consistent with `SKILL.md`. Do not commit generated evidence, local conversations, credentials, or machine-specific configuration.
+- When adding, renaming, removing, or changing a specialist skill's role, check `references/specialist-skills.md` and its entry pointers so routing remains accurate. Reading an existing glossary alone does not require active domain-modeling work.

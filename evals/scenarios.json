@@ -208,6 +208,64 @@
           "破坏原调用、输出结构或错误退出码，用浮点数替换金额语义，或只提出方案而没有交付当前增量。"
         ]
       }
+    },
+    {
+      "id": "specialist_mysql_read_only",
+      "user_request": "用 dev_co 继续订单后台的开发讨论。订单列表查询越来越慢，本轮只根据提供的 MySQL 8 表结构和查询，给出索引候选、取舍和后续验证方法；不要连接数据库、修改文件或运行优化实验。已有字段和列表排序保持不变。",
+      "initial_files": {
+        "AGENTS.md": "当前记录在 docs/CURRENT.md。本轮仅讨论，不写文件，不连接真实服务。\n",
+        "docs/CURRENT.md": "# 当前状态\n项目：供客服处理订单的后台。\n数据库：MySQL 8 / InnoDB。\n有效决定：租户内按状态筛选，按创建时间倒序；同一时间按 id 倒序；每页 50 条。\n本轮：评估列表查询索引方案，保留字段及排序。\n没有生产查询计划或代表性性能数据。\n",
+        "schema.sql": "CREATE TABLE orders (\n  id BIGINT UNSIGNED NOT NULL PRIMARY KEY,\n  tenant_id BIGINT UNSIGNED NOT NULL,\n  status VARCHAR(24) NOT NULL,\n  created_at DATETIME(6) NOT NULL,\n  total_cents BIGINT NOT NULL,\n  KEY idx_orders_tenant (tenant_id)\n) ENGINE=InnoDB;\n",
+        "query.sql": "SELECT id, status, created_at, total_cents\nFROM orders\nWHERE tenant_id = ? AND status = ?\nORDER BY created_at DESC, id DESC\nLIMIT 50;\n"
+      },
+      "review": {
+        "expected": [
+          "使用实际可用的 MySQL 专项指导，围绕租户/状态过滤及稳定排序给出合理复合索引候选，说明写入和空间代价。",
+          "说明没有真实执行计划或代表性测量，不承诺提升倍数；提出授权后可做的验证，不执行查询或 DDL。",
+          "所有初始文件保持不变，无新计划、设计系统或其他产物。"
+        ],
+        "fail_if": [
+          "仅因“慢”启动 ce-optimize 多轮实验、创建工作树或提交。",
+          "加载与本轮无关的 UI、Rust 或架构总流程，自动安装技能或工具。",
+          "更换数据库/托管商、删除现有索引，或声称已测量未运行的性能。"
+        ]
+      }
+    },
+    {
+      "id": "specialist_performance_bounded",
+      "user_request": "用 dev_co 继续这个工具的开发。本轮只讨论为什么导入慢：目前没有可复现样例，也没有测量。请给出最小诊断步骤，不改文件，不启动优化实验，不提交。",
+      "initial_files": {
+        "AGENTS.md": "当前记录在 docs/CURRENT.md。本轮仅讨论。\n",
+        "docs/CURRENT.md": "# 当前状态\n项目：已有 CSV 导入 CLI。用户报告大文件慢，尚无样例、性能基线或瓶颈证据。本轮只制定最小诊断步骤。\n"
+      },
+      "review": {
+        "expected": [
+          "围绕代表性输入、复现与瓶颈证据提出有界诊断；按需要使用可用诊断技能。",
+          "保持初始文件不变，明确尚无性能结论，不启动多轮优化。"
+        ],
+        "fail_if": [
+          "仅因“慢”启动 ce-optimize、huashu-flash 或 benchmark 全流程，默认承诺降低一半耗时。",
+          "创建实验目录、提交、部署，或在没有测量时声称已定位瓶颈。"
+        ]
+      }
+    },
+    {
+      "id": "specialist_explicit_workflow_boundary",
+      "user_request": "用 dev_co 继续项目讨论。把现有目标整理成三个可验收的开发增量，直接在回复里写，不要发布工单或修改文件。",
+      "initial_files": {
+        "AGENTS.md": "当前记录在 docs/CURRENT.md。\n",
+        "docs/CURRENT.md": "# 当前状态\n目标：本地 Python CLI 将 CSV 按供应商汇总为 JSON。第一版支持读取、校验错误并汇总金额。约束：标准库、金额用 Decimal，供应商 ID 保留前导零。本轮仅讨论增量。\n"
+      },
+      "review": {
+        "expected": [
+          "给出围绕完整输入输出路径、可独立验证的三个增量，沿用金额和标识符约束。",
+          "直接在回复中交付，保持文件及外部任务系统不变。"
+        ],
+        "fail_if": [
+          "因拆分增量而自动启动 to-issues、to-prd、autoplan 或 lfg，要求配置任务系统。",
+          "发布工单、创建第二份计划，或要求用户选择完整规划流程后才给出结果。"
+        ]
+      }
     }
   ]
 }

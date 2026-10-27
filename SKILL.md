@@ -34,11 +34,12 @@ description: Coordinate sustained software/system development, product scoping, 
 | 接手、需求漂移、记忆冲突或记录结构需整理 | [memory-and-handoff.md](references/memory-and-handoff.md) |
 | 测试范围难判断、证据失效或反复失败 | [verification-and-recovery.md](references/verification-and-recovery.md) |
 | 第一版实施、阶段交付或安装发布检查 | [delivery-and-release.md](references/delivery-and-release.md) |
+| 当前开发环节需要哪项设计、工程、测试或优化能力 | [specialist-skills.md](references/specialist-skills.md) |
 | 实际使用 `init/brief/verify/gate` 或配置 Hook | [helpers-and-hooks.md](references/helpers-and-hooks.md) |
 
 较长参考资料先看开头的用途与章节导航，再读取所需章节及其适用约束；任务确实跨多个问题时可读多份。已有有效证据可以满足相应阶段，不重做原型或重启立项；系统、CLI 和数据管道使用契约、输入输出、性能或恢复试验，不强加界面流程。
 
-专项技能只在当前环节需要时加载，沿用现行要求与证据，不重启一套审批或完整开发流程。TDD 等方法按需使用。`lfg`、`review`、`qa` 仅在用户明确选用时加载；不通过其他技能绕过，也不将普通开发、检查、测试解释为选用它们。
+当前环节出现专项缺口时，查 [专项技能导航](references/specialist-skills.md) 的对应条目；普通局部修改无需查完整技能表。专项技能只在当前环节需要时加载，选能解决当前问题的最小集合；先确认宿主可用，再读相应入口，不批量加载或自动补装。沿用现行要求、授权与证据，结果回到原项目记录；实验日志等只保存专项证据，不另建一套总计划。尊重所有技能的显式调用策略，其他技能或流程中的引用不构成用户选用。`lfg`、`review`、`qa` 仅在用户明确选用时加载；不通过其他技能绕过，也不将普通开发、检查、测试解释为选用它们。
 
 ## 共用与辅助工具
 
