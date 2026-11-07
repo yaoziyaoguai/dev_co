@@ -12,6 +12,10 @@
 
 专项分流新增场景：`specialist_performance_bounded` 检查未定位瓶颈时保持诊断范围；`specialist_explicit_workflow_boundary` 检查整理增量不会启动工单发布或完整规划流程。只有实际运行并查看动作和产物后才能记为通过；JSON 校验和人工阅读不等同于行为评测。
 
+自动入口新增场景：`implicit_ui_phase_handoff` 检查复合开发任务在进入 UI 阶段时承接已有约束；`existing_spec_acceptance_gap` 检查接续已有规格、发现任务已勾选但验收缺失；`implicit_product_uncertainty` 检查复杂名词不自动触发规格初始化。这些请求不点名技能，应与 `scoped_fix`、`standalone_evaluation` 等负例一起检查。Spec Kit 场景可使用隔离的官方初始化副本，再覆盖给定功能文件；未提供真实宿主集成时，阶段调用结果记为不可用或 inconclusive，不能用仿制技能证明兼容。
+
+仓库维护新增场景：`new_repository_lifecycle` 从空项目开始，`existing_repository_increment` 保留自定义记录、历史断链和活跃运行数据，`active_project_readonly_turn` 检查持续项目中的只读回合。修改生命周期、摘要或 Hook 时选跑受影响场景，关注实际文件差异、基线时机、可执行出口和重复工作；不能以规则/配置文件存在代替检查已接入。使用显式技能请求的试用只证明执行流程，不记作自动路由通过。
+
 ## 怎样运行
 
 1. 使用临时目录或一次性副本，每个场景单独初始化。把 `initial_files` 写成对应的相对路径；可做一次本地 Git 基线，便于查看差异。不要挂载真实项目、凭据或私人会话。

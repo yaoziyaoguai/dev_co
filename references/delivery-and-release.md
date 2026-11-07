@@ -29,6 +29,8 @@ For a new repository, add only what the first release needs. Typical decisions i
 
 Publish or push only within current authorization.
 
+首次持续实施时沿[仓库增量维护](repository-lifecycle.md)确定文件归属和更新义务；需要机械检查时在改动前接入。已有项目复用结构与原生验证，只对当前增量和直接受影响资料应用新约定。阶段出口核对一次，内容不变时复用证据，不在每次编辑后重复初始化或审计。
+
 ## Thin vertical slices
 
 Build the first end-to-end user-visible workflow before broad foundations. The slices should converge on the first-release contract rather than creating several disconnected happy paths. Each slice should cross the necessary UI, domain, and infrastructure boundaries while remaining small enough to verify.

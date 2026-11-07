@@ -549,24 +549,32 @@ class HookTests(ProjectFixture):
         self.assertIn("验证局部行为", result["hookSpecificOutput"]["additionalContext"])
         self.assertFalse((self.root / ".project-workflow").exists())
 
-    def test_stop_continuation_happens_only_once(self):
-        first = hooks.respond(self.event("Stop", stop_hook_active=False))
-        self.assertEqual(first["decision"], "block")
-        second = hooks.respond(self.event("Stop", stop_hook_active=True))
-        self.assertNotIn("decision", second)
-        self.assertIn("systemMessage", second)
+    def test_stop_defaults_to_no_work_even_when_project_is_building(self):
+        with patch.object(workflow, "gate") as gate, patch.object(workflow, "load_state") as load:
+            self.assertEqual(hooks.respond(self.event("Stop")), {})
+        gate.assert_not_called()
+        load.assert_not_called()
+        self.assertNotIn("Stop", hooks.config("codex", None, [])["hooks"])
+
+    def test_opted_in_stop_is_advisory_and_never_forces_continuation(self):
+        for active in (False, True):
+            result = hooks.respond(self.event("Stop", stop_hook_active=active), check_on_stop=True)
+            self.assertNotIn("decision", result)
+            self.assertIn("systemMessage", result)
         self.assertFalse((self.root / ".project-workflow").exists())
+        config = hooks.config("codex", None, [], check_on_stop=True)
+        self.assertIn("--check-on-stop", config["hooks"]["Stop"][0]["hooks"][0]["command"])
 
     def test_discussion_waiting_and_paused_states_do_not_continue(self):
         for phase in ("explore", "shape", "recover"):
             self.meta["phase"] = phase
             self.save()
-            self.assertEqual(hooks.respond(self.event("Stop")), {})
+            self.assertEqual(hooks.respond(self.event("Stop"), check_on_stop=True), {})
         self.meta["phase"] = "repair"
         for status in ("needs-user", "blocked", "paused"):
             self.meta["status"] = status
             self.save()
-            self.assertEqual(hooks.respond(self.event("Stop")), {})
+            self.assertEqual(hooks.respond(self.event("Stop"), check_on_stop=True), {})
 
     def test_success_does_not_grant_permission(self):
         self.verify()
@@ -589,13 +597,13 @@ class HookTests(ProjectFixture):
         self.meta["verification"]["checks"] = []
         self.meta["verification"]["inputs"] = []
         self.save()
-        result = hooks.respond(self.event("Stop"))
+        result = hooks.respond(self.event("Stop"), check_on_stop=True)
         self.assertNotIn("decision", result)
         self.assertIn("systemMessage", result)
 
     def test_malformed_record_and_cwd_do_not_claim_success(self):
         self.state.write_text('---\n{"workflow":"dev_co",}\n---\n')
-        self.assertIn("systemMessage", hooks.respond(self.event("Stop")))
+        self.assertIn("systemMessage", hooks.respond(self.event("Stop"), check_on_stop=True))
         result = hooks.respond(self.event("PreToolUse"), protect=True)
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
         result = hooks.respond({"hook_event_name": "PreToolUse"}, protect=True)

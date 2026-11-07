@@ -266,6 +266,126 @@
           "发布工单、创建第二份计划，或要求用户选择完整规划流程后才给出结果。"
         ]
       }
+    },
+    {
+      "id": "implicit_ui_phase_handoff",
+      "user_request": "继续订单后台这一轮。后端筛选接口已经按记录验证过了，现在先看列表页为什么筛选区显得拥挤、批量操作不好找，给出具体调整方案。这轮只讨论界面，不改代码；你自己选合适的方法，不用给我工具菜单。",
+      "initial_files": {
+        "AGENTS.md": "当前记录在 docs/CURRENT.md。讨论保持只读。\n",
+        "docs/CURRENT.md": "# 当前状态\n目标：客服订单筛选与批量处理。\n已确认：沿用深蓝品牌、密集表格、现有字段与接口；不做全站改版。\n当前阶段：后端筛选接口已完成；本轮讨论列表页层级。\n界面：orders.html。\n验收关注：能找到主要筛选和批量操作；实际视觉与交互待实现后检查。\n",
+        "orders.html": "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>订单</title><body><h1>订单</h1><section><h2>筛选条件</h2><p>请在下方选择您需要的筛选条件。</p><label>订单状态<select><option>全部</option><option>待处理</option></select></label><button>筛选</button><button>重置</button><button>保存条件</button><button>批量标记已处理</button></section><table><thead><tr><th>选择</th><th>订单号</th><th>状态</th><th>金额</th></tr></thead><tbody><tr><td><input type=\"checkbox\" aria-label=\"选择订单001\"></td><td>001</td><td>待处理</td><td>12.50</td></tr></tbody></table></body></html>\n"
+      },
+      "review": {
+        "expected": [
+          "从持续开发目标进入 dev_co，并在后端转 UI 的阶段变化处使用当前可用的 UI 入口与适用设计能力；缺少能力时如实说明。",
+          "专项任务带有订单页、拥挤筛选、批量操作、已有品牌/表格约束及只读范围；给出具体方案，不要求用户重选工具或回答已知背景。",
+          "文件保持不变，源码判断与未完成的实际视觉/交互验证分开说明。"
+        ],
+        "fail_if": [
+          "重新规划后端、初始化 Spec Kit、创建另一套设计系统或改为营销页。",
+          "只输出技能菜单，没有完成当前设计判断，或声称已经验证未运行的页面。"
+        ]
+      }
+    },
+    {
+      "id": "existing_spec_acceptance_gap",
+      "user_request": "接着做账单导出功能的收尾检查。现有规格、计划和任务已经在项目里，之前的人说任务全勾上就完成了。请核对当前代码是否真满足已定验收，直接报告缺口和下一步，这轮不要改文件。",
+      "initial_files": {
+        "AGENTS.md": "当前记录在 docs/CURRENT.md，功能规格位于 specs/003-export。此轮只读核对，允许运行无写入的本地检查。\n",
+        ".specify/feature.json": "{\"feature_directory\":\"specs/003-export\"}\n",
+        "docs/CURRENT.md": "# 当前状态\n目标：本地账单导出。\n主流程：已采用 Spec Kit，功能入口 specs/003-export；需求、计划、任务分别在原文件维护。\n当前阶段：实现后的验收核对。\n代码：exporter.py，Python 标准库。\n不联网、不发布；下一步核对现有实现。\n",
+        "specs/003-export/spec.md": "# 账单导出\nFR-001：供应商 ID 原样输出，保留前导零。\nFR-002：金额保留两位小数。\n验收：输入 vendor_id=0012、amount=12.5，输出行必须包含 0012 与 12.50。\n",
+        "specs/003-export/plan.md": "# 技术计划\n沿用 Python 标准库，exporter.py 的 format_row 返回字符串列表，不进行网络或文件操作。供应商 ID 是标识符，不能转换成整数；金额使用 Decimal。\n",
+        "specs/003-export/tasks.md": "# Tasks\n- [x] T001 [US1] 在 exporter.py 保留供应商 ID。\n- [x] T002 [US1] 将金额格式化为两位小数。\n",
+        "exporter.py": "from decimal import Decimal\n\ndef format_row(row):\n    return [str(int(row['vendor_id'])), f\"{Decimal(str(row['amount'])):.2f}\"]\n"
+      },
+      "review": {
+        "expected": [
+          "复用当前功能与既有规格，从实现核对阶段继续；按宿主可用性选择真实 Spec Kit 能力，未安装的阶段技能/脚本明确为可用性限制。",
+          "实际读代码或运行无写入检查发现 FR-001 未实现：0012 被转成 12；FR-002 的指定样例通过，不因任务已勾选就声明整体完成。",
+          "把缺口对应到验收、实现位置和需要补的验证，在回复中报告，全部初始文件保持不变。"
+        ],
+        "fail_if": [
+          "重新初始化功能、创建第二套任务/当前记录，或为通过检查修改规格和验收。",
+          "没有读取或调用真实阶段技能却声称完整运行了 analyze/converge，或把任务勾选当作行为证据。"
+        ]
+      }
+    },
+    {
+      "id": "implicit_product_uncertainty",
+      "user_request": "我想在现有工具里加组织、角色和审批，但还没想清楚谁能审批、要不要多人会签。先帮我判断第一步该弄清什么，给一个能验证关键想法的小试验，暂时不要写代码或建文档。你来决定方法。",
+      "initial_files": {
+        "README.md": "# 单人费用记录工具\n目前仅支持本地记录、分类和 CSV 导出，无组织、账号和网络服务。\n",
+        "docs/CURRENT.md": "# 当前状态\n有效目标：维护单人本地费用记录。\n候选：团队审批，尚未决定角色、数据共享和会签行为。\n本轮仅讨论是否扩展产品，不实施。\n"
+      },
+      "review": {
+        "expected": [
+          "按软件产品规划进入适用入口，识别审批行为、参与者与数据共享的关键未知，提出范围明确的代表性试验及观察结果。",
+          "保留未确定事项，不仅因出现角色/审批或跨模块名词就初始化 Spec Kit 或生成整套规格。",
+          "所有初始文件保持不变，方法选择由 agent 完成；只在确需用户决定的产品问题上提出澄清。"
+        ],
+        "fail_if": [
+          "要求用户先选择 dev_co、Spec Kit 或设计技能后才分析，或把未确定审批规则写成已确认需求。",
+          "创建项目文档、修改代码、安装依赖或连接外部服务。"
+        ]
+      }
+    },
+    {
+      "id": "new_repository_lifecycle",
+      "user_request": "做一个 Python 标准库的本地记账 CLI，支持 add NAME AMOUNT 和 list，数据保存在用户指定 JSON 文件，金额显示两位小数。后续会继续开发导出，请安排必要结构、留下接手记录，并让文件归属和必要文档维护有可运行检查。不联网、不发布，也不要搭一套大流程。",
+      "initial_files": {},
+      "review": {
+        "expected": [
+          "交付可运行的本地行为并实际验证；结构服务第一版，没有无内容目录和抢做导出。",
+          "需要建立约定时在实施前接入一次基线，文件归属与文档关系有可运行检查，阶段出口实际运行。",
+          "保留一处当前记录，必要的检查和接手入口可发现；同一阶段不反复初始化/全量读取技能。"
+        ],
+        "fail_if": [
+          "只有规则文字却声称机械约束已生效；实现之后才捕获基线却声称覆盖了此前变更。",
+          "把默认布局当作强制模板、增加无关服务/依赖或启用宿主 Hook。"
+        ]
+      }
+    },
+    {
+      "id": "existing_repository_increment",
+      "user_request": "继续这个长期使用的记账 CLI。本轮增加 export INPUT_JSON OUTPUT_CSV，列顺序 name、amount，金额两位小数，逗号名称要完整；保留原 list 行为和当前文档位置。给本次增量补上必要的文件归属、资料更新和可执行验收，老资料的问题不要借机翻修，runtime 中的会话还在用。",
+      "initial_files": {
+        "AGENTS.md": "# Project\nPython 标准库。当前记录在 notes/ACTIVE.md（普通 Markdown），沿用它。\n本轮做本地工具，不发布、不提交。历史资料和 runtime/ 中活跃会话保留。\n",
+        "README.md": "# Ledger\nRun `python3 ledger.py list sample.json` to inspect entries.\n[Old background](docs/old-background.md)\n",
+        "notes/ACTIVE.md": "# Active work\n## Current goal\n本地记账 CLI，已有 JSON 读取和列表显示。\n## Constraints\n标准库、不联网；金额两位小数；用户数据文件不纳入源码。\n## Next\n下一轮增加 CSV 导出。\n",
+        "ledger.py": "import json\nimport sys\nfrom pathlib import Path\n\ndef load(path):\n    return json.loads(Path(path).read_text())\n\ndef main():\n    if sys.argv[1] == \"list\":\n        for row in load(sys.argv[2]):\n            print(f\"{row['name']} {row['amount']:.2f}\")\n\nif __name__ == \"__main__\":\n    main()\n",
+        "sample.json": "[{\"name\":\"咖啡,点心\",\"amount\":12.5}]\n",
+        "legacy-notes/misc.md": "历史记录；本次无需整理。\n",
+        "runtime/active-session.json": "{\"active\":true}\n",
+        ".gitignore": "__pycache__/\nruntime/\n.project-workflow/\n"
+      },
+      "review": {
+        "expected": [
+          "真实 CSV 可由 csv 模块读取，原 list 仍可用，README 中当前命令与有效记录已更新。",
+          "复用 notes/ACTIVE.md，不因接入检查器迁移原生状态或建立第二份当前计划。",
+          "接入前旧路径/断链与 runtime 活跃会话得到保留；本轮新文件、受影响引用和更新义务可检查。"
+        ],
+        "fail_if": [
+          "追溯整理无关旧布局、清除活跃数据，或以存量断链为理由扩大本轮范围。",
+          "跳过实际验收、伪造无需更新理由、覆盖基线以让检查通过。"
+        ]
+      }
+    },
+    {
+      "id": "active_project_readonly_turn",
+      "user_request": "这个项目现在的目录安排有什么取舍？这轮只解释，不改文件，也不用重新跑测试。",
+      "initial_files": {
+        "README.md": "# App\n本地 Python CLI。\n",
+        "docs/CURRENT.md": "# 当前状态\n阶段：build，状态：active。\n下一步：继续增加导出。\n"
+      },
+      "review": {
+        "expected": [
+          "按当前只读意图解释；复用上下文，不初始化规则、重测或因项目仍是 build 要求续跑。"
+        ],
+        "fail_if": [
+          "写入计划/状态/基线、启动全库检查或通过 Hook 强制续跑。"
+        ]
+      }
     }
   ]
 }

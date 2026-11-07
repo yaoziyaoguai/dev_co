@@ -19,7 +19,8 @@ def configured_root(root: Path) -> Path:
     return resolved
 
 
-def config(host: str, state: str | None, protect_tools: list[str], root: Path | None = None) -> dict:
+def config(host: str, state: str | None, protect_tools: list[str], root: Path | None = None,
+           check_on_stop: bool = False) -> dict:
     base = [sys.executable, str(Path(__file__).resolve()), "--host", host]
     if root is not None:
         base.extend(["--root", str(configured_root(root))])
@@ -30,8 +31,9 @@ def config(host: str, state: str | None, protect_tools: list[str], root: Path | 
     hooks = {
         "SessionStart": [{"matcher": matcher, "hooks": [
             {"type": "command", "command": command, "timeout": 10}]}],
-        "Stop": [{"hooks": [{"type": "command", "command": command, "timeout": 10}]}],
     }
+    if check_on_stop:
+        hooks["Stop"] = [{"hooks": [{"type": "command", "command": command + " --check-on-stop", "timeout": 10}]}]
     if protect_tools:
         hooks["PreToolUse"] = [{
             "matcher": "^(?:" + "|".join(re.escape(t) for t in protect_tools) + ")$",
@@ -41,15 +43,21 @@ def config(host: str, state: str | None, protect_tools: list[str], root: Path | 
 
 
 def respond(payload: dict, state_name: str | None = None, protect: bool = False,
-            root: Path | None = None) -> dict:
+            root: Path | None = None, check_on_stop: bool = False) -> dict:
     event = payload.get("hook_event_name")
     if event not in {"SessionStart", "Stop", "PreToolUse"}:
+        return {}
+    # 项目处于 build 不代表本轮仍在实施；默认不在每条只读回复后扫描证据或强制续跑。
+    if event == "Stop" and not check_on_stop or event == "PreToolUse" and not protect:
         return {}
     try:
         cwd = payload.get("cwd")
         if not isinstance(cwd, str) or not cwd or not Path(cwd).is_absolute() or not Path(cwd).is_dir():
             raise workflow.WorkflowError("hook 缺少有效的项目 cwd。")
-        root = configured_root(root) if root is not None else workflow.project_root(Path(cwd))
+        event_directory = Path(cwd).resolve()
+        root = configured_root(root) if root is not None else workflow.project_root(event_directory)
+        if not event_directory.is_relative_to(root):
+            raise workflow.WorkflowError("事件 cwd 不属于配置的项目根；请核对该项目的 Hook 配置。")
         state = workflow.locate_state(root, state_name)
         if not state:
             if protect or state_name:
@@ -78,11 +86,8 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
         if result["ready"]:
             return {}
         reason = "；".join(result["reasons"])
-        if payload.get("stop_hook_active"):
-            return {"systemMessage": "验证仍未满足：" + reason + "。保留未完成状态，避免无限续跑。"}
-        return {"decision": "block",
-                "reason": "本轮证据不足：" + reason +
-                "。仅执行已授权的相关检查；如有真实阻塞或需要用户决定，更新状态并如实报告。"}
+        return {"systemMessage": "项目证据尚未满足：" + reason +
+                "。这是可选提醒；依本轮意图报告缺口，不从项目阶段推断续跑授权。"}
     except (workflow.WorkflowError, OSError, ValueError, TypeError) as error:
         message = "项目工作记录/证据无法核对：" + str(error)
         if event == "PreToolUse" and protect:
@@ -100,16 +105,17 @@ def main() -> int:
     parser.add_argument("--protect", action="store_true")
     parser.add_argument("--print-config", action="store_true")
     parser.add_argument("--protect-tool", action="append", default=[])
+    parser.add_argument("--check-on-stop", action="store_true", help="显式选择结束时的证据提醒；不阻止只读回合或自动续跑。")
     args = parser.parse_args()
     try:
         if args.print_config:
-            print(json.dumps(config(args.host, args.state, args.protect_tool, args.root),
+            print(json.dumps(config(args.host, args.state, args.protect_tool, args.root, args.check_on_stop),
                              ensure_ascii=False, indent=2))
             return 0
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("hook 输入必须为对象")
-        result = respond(payload, args.state, args.protect, args.root)
+        result = respond(payload, args.state, args.protect, args.root, args.check_on_stop)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except (OSError, ValueError, TypeError, workflow.WorkflowError) as error:

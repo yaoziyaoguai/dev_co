@@ -125,7 +125,8 @@ class HookRootTests(unittest.TestCase):
         self.assertEqual(hooks.respond(event, protect=True, root=self.project), {})
         (self.project / "source.txt").write_text("子项目改动")
         self.assert_denied(hooks.respond(event, protect=True, root=self.project))
-        self.assertEqual(hooks.respond(self.event("Stop"), root=self.project)["decision"], "block")
+        self.assertIn("systemMessage", hooks.respond(self.event("Stop"), root=self.project, check_on_stop=True))
+        self.assertEqual(hooks.respond(self.event("Stop"), root=self.project), {})
 
     def test_explicit_root_does_not_fall_back_to_parent_record(self):
         self.state.unlink()

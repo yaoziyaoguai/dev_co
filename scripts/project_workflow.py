@@ -3,74 +3,29 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from context_brief import summarize
+from workflow_files import (IGNORED, WorkflowError, digest, file_hash, git_file_names, read_text,
+                            safe_path, secret_like, write_json)
+
 WORKFLOW = "dev_co"
 ACCEPTED_WORKFLOWS = (WORKFLOW, "start-software-project")
 CANDIDATES = ("docs/CURRENT.md", "docs/PROJECT.md", "CURRENT.md")
 PHASES = {"explore", "shape", "build", "repair", "recover", "deliver"}
 STATUSES = {"active", "needs-user", "blocked", "paused", "ready", "done"}
-IGNORED = {".git", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".project-workflow"}
 NON_INTENT_SECTIONS = {"最近验证", "下一步", "接手记录", "候选想法"}
 RUN_ID = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{8}")
-
-
-class WorkflowError(Exception):
-    pass
-
-
-def digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-
-
-def safe_path(root: Path, relative: str, *, no_symlinks: bool = False) -> Path:
-    if not isinstance(relative, str) or not relative:
-        raise WorkflowError("路径必须为非空字符串。")
-    path = Path(relative)
-    if path.is_absolute() or ".." in path.parts:
-        raise WorkflowError("路径必须位于项目内：" + relative)
-    if no_symlinks:
-        current = root
-        for part in path.parts:
-            current = current / part
-            if current.is_symlink():
-                raise WorkflowError("状态和证据路径不得经过符号链接：" + relative)
-    resolved = (root / path).resolve()
-    if not resolved.is_relative_to(root.resolve()):
-        raise WorkflowError("路径或符号链接越过项目边界：" + relative)
-    return resolved
-
-
-def read_text(path: Path, limit: int = 128_000) -> str:
-    with path.open(encoding="utf-8") as source:
-        value = source.read(limit + 1)
-    if len(value) > limit:
-        raise WorkflowError("文件过大：" + str(path))
-    return value
-
-
-def file_hash(path: Path) -> str:
-    value = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(65536), b""):
-            value.update(block)
-    return value.hexdigest()
-
-
-def write_json(path: Path, value: object) -> None:
-    temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
-    temporary.replace(path)
 
 
 def git_value(root: Path, *args: str) -> str | None:
@@ -141,6 +96,9 @@ def load_state(path: Path) -> tuple[dict, str]:
         raise WorkflowError("goal_revision 必须为正整数。")
     if not isinstance(meta.get("environment"), str) or not meta["environment"]:
         raise WorkflowError("environment 必须说明当前验证环境。")
+    sections = meta.get("non_intent_sections", [])
+    if not isinstance(sections, list) or not all(isinstance(s, str) and s.strip() for s in sections):
+        raise WorkflowError("non_intent_sections 必须为非空标题字符串的列表；空列表表示全部正文参与。")
     return meta, body
 
 
@@ -149,6 +107,7 @@ def intent(meta: dict, body: str) -> str:
     kept, skip = [], False
     fence = None
     conservative = False
+    sections = meta.get("non_intent_sections", sorted(NON_INTENT_SECTIONS))
     for line in body.splitlines():
         if fence:
             if re.fullmatch(r" {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}[ \t]*", line):
@@ -166,11 +125,12 @@ def intent(meta: dict, body: str) -> str:
                 heading = re.match(r"^ {0,3}(#{1,2})(?:[ \t]+(.*))?$", line)
                 if heading:
                     title = re.sub(r"[ \t]+#+[ \t]*$", "", heading[2] or "").strip()
-                    skip = heading[1] == "##" and title in NON_INTENT_SECTIONS
+                    skip = heading[1] == "##" and title in sections
         if not skip:
             kept.append(line)
     # 旧算法可能漏掉围栏之后的要求，不能把旧指纹直接视作已修复的证据。
-    return digest({"version": 2, "goal_revision": meta.get("goal_revision", 1),
+    return digest({"version": 3, "goal_revision": meta.get("goal_revision", 1),
+                   "non_intent_sections": sections,
                    "body": body.strip() if conservative or fence else "\n".join(kept).strip()})
 
 
@@ -184,6 +144,11 @@ def verification_plan(meta: dict) -> dict:
         raise WorkflowError("说明选择本轮验证范围的理由。")
     if plan.get("freshness", "git") not in ("git", "content"):
         raise WorkflowError("verification.freshness 必须为 git/content；省略时沿用 git。")
+    if "repository_policy" in plan and (not isinstance(plan["repository_policy"], str) or not plan["repository_policy"]):
+        raise WorkflowError("repository_policy 必须是仓库规则的项目内相对路径。")
+    if "repository_policy" in plan and (not isinstance(plan.get("repository_scope"), str)
+                                       or not plan["repository_scope"].strip()):
+        raise WorkflowError("启用 repository_policy 时必须声明当前 repository_scope。")
     checks = plan.get("checks", [])
     if not isinstance(checks, list):
         raise WorkflowError("verification.checks 必须是列表。")
@@ -206,48 +171,96 @@ def verification_plan(meta: dict) -> dict:
         raise WorkflowError("执行检查前需要声明所覆盖的 inputs。")
     if not all(isinstance(p, str) and p for p in plan.get("inputs", [])):
         raise WorkflowError("inputs 中的路径必须为非空字符串。")
+    exclusions = plan.get("exclude", [])
+    if not isinstance(exclusions, list) or not all(
+            isinstance(p, str) and p and not Path(p).is_absolute() and ".." not in Path(p).parts
+            and "\\" not in p and p != "." and Path(p).as_posix() == p.rstrip("/") for p in exclusions):
+        raise WorkflowError("exclude 必须为规范的项目内相对路径列表；目录以 / 结尾，不使用 glob。")
     return plan
 
 
-def secret_like(path: Path) -> bool:
-    return any(p.startswith(".env") or p.lower() in {
-        ".ssh", ".aws", ".npmrc", ".pypirc", "credentials.json", "auth.json",
-        "cookies.json", "id_rsa", "id_ed25519"
-    } for p in path.parts) or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}
-
-
-def snapshot(root: Path, inputs: list[str], state: Path) -> dict:
-    files, excluded = {}, set()
+def snapshot(root: Path, inputs: list[str], state: Path, exclusions: list[str] | None = None) -> dict:
+    files, excluded, links = {}, set(), {}
+    candidates: dict[Path, bool] = {}
     total = 0
+    exclusions = exclusions or []
+
+    def omitted(name: str) -> bool:
+        return any(name == p.rstrip("/") or p.endswith("/") and name.startswith(p) for p in exclusions)
+
+    directories = []
     for name in inputs:
         base = safe_path(root, name, no_symlinks=True)
-        if secret_like(Path(name)):
-            raise WorkflowError("验证输入不得包含凭据路径：" + name)
+        if secret_like(Path(name)) or set(Path(name).parts) & {".git", ".project-workflow"}:
+            raise WorkflowError("验证输入不得包含凭据、Git 元数据或验证证据路径：" + name)
         if not base.exists():
             raise WorkflowError("验证输入不存在：" + name)
-        candidates = [base]
         if base.is_dir():
-            candidates = []
+            directories.append(base)
+        else:
+            candidates[base] = True
+    names = git_file_names(root, [p.relative_to(root).as_posix() for p in directories]) if directories else []
+    if names is not None:
+        for name in names:
+            # 保留链接本身，不能先 resolve 后把链接身份丢掉。
+            path = root / name
+            if not omitted(name) and os.path.lexists(path):
+                candidates.setdefault(path, False)
+    else:
+        for base in directories:
             for directory, dirs, names in os.walk(base, followlinks=False):
-                dirs[:] = sorted(d for d in dirs if d not in IGNORED and
-                                 not (Path(directory) / d).is_symlink() and
-                                 not secret_like((Path(directory) / d).relative_to(root)))
-                candidates.extend(Path(directory) / n for n in sorted(names))
-        for path in candidates:
-            relative = path.relative_to(root)
-            key = relative.as_posix()
-            if path == state or set(relative.parts) & IGNORED:
-                continue
-            if path.is_symlink() or secret_like(relative):
-                excluded.add(key)
-                continue
-            if not path.is_file() or key in files:
-                continue
-            size = path.stat().st_size
-            total += size
-            if size > 8_000_000 or total > 64_000_000 or len(files) >= 5000:
+                kept = []
+                for entry in sorted(dirs + names):
+                    path = Path(directory) / entry
+                    relative = path.relative_to(root)
+                    key = relative.as_posix()
+                    if secret_like(relative):
+                        excluded.add(key)
+                        continue
+                    if set(relative.parts) & IGNORED or omitted(key):
+                        continue
+                    if entry in dirs and not path.is_symlink():
+                        kept.append(entry)
+                    else:
+                        candidates.setdefault(path, False)
+                dirs[:] = kept
+    for path, explicit in sorted(candidates.items()):
+        relative = path.relative_to(root)
+        key = relative.as_posix()
+        if path == state or set(relative.parts) & {".git", ".project-workflow"}:
+            continue
+        if secret_like(relative):
+            excluded.add(key)
+            continue
+        if not explicit and omitted(key):
+            continue
+        # Git 索引可能保留已被链接替换的父目录下的旧路径，不能沿该路径读取目标。
+        safe_path(root, relative.parent.as_posix(), no_symlinks=True)
+        if len(files) >= 5000:
+            raise WorkflowError("验证输入过大；请选择与本轮检查相关的源码、测试和依赖声明。")
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            try:
+                target = path.resolve(strict=True)
+            except (OSError, RuntimeError) as error:
+                raise WorkflowError("链接目标不可核对：" + key) from error
+            if not target.is_relative_to(root) or secret_like(target.relative_to(root)):
+                raise WorkflowError("链接目标越界或涉及敏感路径：" + key)
+            links[key] = target
+            files[key] = {"type": "symlink", "target": os.readlink(path),
+                          "resolved": target.relative_to(root).as_posix()}
+        elif stat.S_ISREG(info.st_mode):
+            total += info.st_size
+            if info.st_size > 8_000_000 or total > 64_000_000:
                 raise WorkflowError("验证输入过大；请选择与本轮检查相关的源码、测试和依赖声明。")
-            files[key] = file_hash(path)
+            files[key] = {"type": "file", "content": file_hash(path), "executable": info.st_mode & 0o111}
+        else:
+            raise WorkflowError("验证输入不是普通文件或可核对链接：" + key)
+    regular = [root / name for name, value in files.items() if value["type"] == "file"]
+    for name, target in links.items():
+        covered = target in regular if target.is_file() else any(p.is_relative_to(target) for p in regular)
+        if not covered:
+            raise WorkflowError("链接目标未进入实际验证输入：" + name + "；请显式声明所依赖的项目内真实文件。")
     if not files:
         raise WorkflowError("没有可追踪的验证输入。")
     return {"digest": digest(files), "files": files, "excluded": sorted(excluded)}
@@ -270,9 +283,22 @@ def read_evidence(root: Path) -> dict | None:
         raise WorkflowError("验证记录无法读取：" + str(error)) from error
 
 
-def gate(root: Path, state: Path) -> dict:
-    meta, body = load_state(state)
-    plan = verification_plan(meta)
+def repository_status(root: Path, plan: dict) -> dict | None:
+    if "repository_policy" not in plan:
+        return None
+    import repository_check
+    result = repository_check.check(root, plan["repository_policy"], scope=plan["repository_scope"])
+    return {"ready": result["ready"], "reasons": result["errors"], "repository": result}
+
+
+def repository_preflight(root: Path, plan: dict) -> None:
+    if "repository_policy" in plan:
+        import repository_check
+        repository_check.load_policy(root, plan["repository_policy"])
+        repository_check.load_baseline(root, plan["repository_policy"], plan["repository_scope"])
+
+
+def evidence_status(root: Path, state: Path, meta: dict, body: str, plan: dict) -> dict:
     if not plan.get("checks"):
         return {"ready": False, "reasons": ["未配置自动检查；需要如实说明手工验收或尚未验证。"]}
     if safe_path(root, ".project-workflow/verify.lock", no_symlinks=True).exists():
@@ -280,7 +306,7 @@ def gate(root: Path, state: Path) -> dict:
     report = read_evidence(root)
     if not report:
         return {"ready": False, "reasons": ["当前项目没有验证执行记录。"]}
-    current = snapshot(root, plan["inputs"], state)
+    current = snapshot(root, plan["inputs"], state, plan.get("exclude"))
     reasons = []
     expected = {"plan_hash": digest(plan),
                 "intent_hash": intent(meta, body), "input_hash": current["digest"],
@@ -323,6 +349,19 @@ def gate(root: Path, state: Path) -> dict:
             "coverage": list(current["files"]), "excluded": current["excluded"]}
 
 
+def gate(root: Path, state: Path) -> dict:
+    meta, body = load_state(state)
+    plan = verification_plan(meta)
+    repository = repository_status(root, plan)
+    evidence = evidence_status(root, state, meta, body, plan)
+    result = {**evidence, "verification_ready": evidence["ready"]}
+    if repository is not None:
+        result.update(ready=evidence["ready"] and repository["ready"],
+                      reasons=evidence["reasons"] + repository["reasons"],
+                      repository=repository["repository"])
+    return result
+
+
 def execute_check(argv: list[str], root: Path, log: Path, timeout: float) -> tuple[int, bool]:
     with log.open("wb") as output:
         try:
@@ -363,12 +402,18 @@ def execute_check(argv: list[str], root: Path, log: Path, timeout: float) -> tup
             raise
 
 
-def verify(root: Path, state: Path) -> dict:
+def verify(root: Path, state: Path, *, reuse: bool = False) -> dict:
+    if reuse:
+        existing = gate(root, state)
+        if existing["verification_ready"]:
+            return {**existing, "reused": True}
     meta, body = load_state(state)
     plan = verification_plan(meta)
+    if not reuse:
+        repository_preflight(root, plan)
     if not plan.get("checks"):
         raise WorkflowError("没有自动检查；不要为通过门槛编造测试。记录实际手工验收即可。")
-    before = snapshot(root, plan["inputs"], state)
+    before = snapshot(root, plan["inputs"], state, plan.get("exclude"))
     before_identity = identity(root)
     storage = safe_path(root, ".project-workflow", no_symlinks=True)
     storage.mkdir(exist_ok=True)
@@ -394,7 +439,7 @@ def verify(root: Path, state: Path) -> dict:
                          "timed_out": timed_out, "duration_seconds": round(time.monotonic() - started, 3),
                          "log": log.relative_to(root).as_posix(),
                          "log_hash": file_hash(log)})
-        after = snapshot(root, plan["inputs"], state)
+        after = snapshot(root, plan["inputs"], state, plan.get("exclude"))
         after_meta, after_body = load_state(state)
         report = {
             "schema": 1, "status": "complete", "run_id": run_id, "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -413,7 +458,7 @@ def verify(root: Path, state: Path) -> dict:
     finally:
         (lock / "owner.json").unlink(missing_ok=True)
         lock.rmdir()
-    return gate(root, state)
+    return {**gate(root, state), "reused": False}
 
 
 def initialize(root: Path, relative: str, goal: str) -> Path:
@@ -430,6 +475,7 @@ def initialize(root: Path, relative: str, goal: str) -> Path:
     body = (
         "# 当前项目工作\n\n## 本轮目标\n" + goal +
         "\n\n## 验收标准\n尚未确定；由 agent 根据当前目标起草，区分建议与已确定要求。"
+        "\n\n## 项目约束\n引用项目入口的有效约定；只补充影响本轮的范围与边界。"
         "\n\n## 当前决定\n- 当前有效：尚未记录。\n- 已替代：尚未记录。"
         "\n\n## 候选想法\n尚未记录；采纳后移入当前决定或验收标准。"
         "\n\n## 代码导航\n尚未定位；仅补充本轮需要的入口、模块和测试。"
@@ -451,12 +497,10 @@ def brief(root: Path, state: Path) -> str:
         "技能：" + WORKFLOW, "项目：" + str(root),
         "阶段/状态：" + meta["phase"] + " / " + meta["status"],
         "分支/提交：" + str(current["branch"]) + " / " + str(current["head"]),
-        "状态记录：" + str(state), body.strip()[:6500],
+        "状态记录：" + str(state), summarize(body, meta.get("brief_sections")),
     ]
     if dirty:
         result.append("工作树摘要（截取；据此定位相关差异）：\n" + dirty[:1200])
-    if len(body.strip()) > 6500:
-        result.append("当前记录摘要已截断；继续读取状态文件中本轮相关的决定、导航和下一步。")
     return "\n\n".join(result)
 
 
@@ -466,12 +510,15 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--state", help="项目内状态文档路径；不提供时识别常用位置。")
     parser.add_argument("--goal", default="待明确当前项目的本轮成果。")
+    parser.add_argument("--reuse", action="store_true", help="verify 优先复用仍有效的通过证据，不重复运行检查。")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, lambda number, frame: sys.exit(128 + number))
     root = args.root.resolve()
     try:
         if not root.is_dir():
             raise WorkflowError("项目目录不存在。")
+        if args.reuse and args.command != "verify":
+            raise WorkflowError("--reuse 只用于 verify。")
         if args.command == "init":
             print(initialize(root, args.state or CANDIDATES[0], args.goal))
             return 0
@@ -481,7 +528,7 @@ def main() -> int:
         if args.command == "brief":
             print(brief(root, state))
             return 0
-        result = verify(root, state) if args.command == "verify" else gate(root, state)
+        result = verify(root, state, reuse=args.reuse) if args.command == "verify" else gate(root, state)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["ready"] else 1
     except (WorkflowError, OSError, ValueError, TypeError) as error:

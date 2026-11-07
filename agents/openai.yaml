@@ -1,7 +1,7 @@
 interface:
   display_name: "dev_co"
-  short_description: "从新项目到持续开发，维护当前共识、控制推进节奏，并按影响范围验证"
-  default_prompt: "使用 $dev_co 帮我启动或继续这个项目：先恢复当前目标与决定，选择本轮可交付结果，按影响范围验证并更新项目记忆。"
+  short_description: "持续开发入口：自动选择当前专项能力，保留项目共识并核对验收证据"
+  default_prompt: "使用 $dev_co 继续这个项目：恢复有效目标，自动选择当前需要的方法和技能，交付可验证的增量并更新原有记录。"
 
 policy:
   allow_implicit_invocation: true

@@ -4,7 +4,7 @@
 
 ![dev_co：两个开发工具共用一本当前计划，沿着小步骤推进](assets/dev-co-cover.png)
 
-`dev_co` 是供 Codex 和 Claude Code 共用的开发协作技能。它让 Agent 在持续开发中维护当前目标、分清决定和想法、交付能检查的小结果，并留下下一次接手需要的记录。
+`dev_co` 是可以由兼容 coding agent 共用的开发协作入口。它让 Agent 在持续开发中维护当前目标、自动选择当前需要的专项能力、分清决定和想法、交付能检查的小结果，并留下下一次接手需要的记录。
 
 它来自我和 AI 协作时遇到的麻烦和顾虑：边做边改主意，担心旧要求仍被沿用；换了 Agent，又得重新解释项目；只改一个小模块，也可能等来一整套回归。于是，我和 AI 把这些问题逐条整理成了这份技能。
 
@@ -65,6 +65,8 @@ PY
 
 使用自定义 `CODEX_HOME` 时，将 Codex 的目标改为该目录下的 `skills/dev_co`。只用一个宿主，可以只保留相应目标。其他环境可以复制技能文件到宿主的技能目录；两个独立副本需要自行同步。
 
+OpenCode、ZCode 等其他宿主应先核实其实际技能目录、全局规则文件和原生调用方式，再链接或同步同一来源。不要把 Codex 专用元数据、工具调用名或运行权限当作其他宿主已经支持。文件同步、技能发现和实际任务执行分别验证。
+
 安装后开启新会话。Codex 用 `$dev_co`，Claude Code 用 `/dev_co`。已有会话读过旧版时，需要重新读取技能。
 
 ### 更新已安装版本
@@ -75,7 +77,14 @@ PY
 
 ## 先拿一个真实的小任务试用
 
-在 Codex 中可以这样开始；Claude Code 把 `$dev_co` 换成 `/dev_co`：
+已配置自动入口后，可以直接描述目标，不需要记技能名：
+
+```text
+继续这个项目，这一轮把 CSV 导入丢失前导零的问题修好。
+保留原字段和备注，检查受影响行为，并留下接手记录。
+```
+
+要单独检查显式调用，在 Codex 中可以这样开始；Claude Code 把 `$dev_co` 换成 `/dev_co`：
 
 ```text
 使用 $dev_co 继续这个项目。先读已有记录，确认现在有效的目标。
@@ -95,6 +104,8 @@ PY
 ## 什么时候自动用
 
 按当前任务的意图判断，而不是看到仓库、代码或 `CURRENT.md` 就启动。
+
+明确继续已有开发目标的规划、UI、审查或验收阶段时，沿用 dev_co 再进入当前专项；本轮只读限制的是动作。独立的一次性评审仍可直接处理，不因项目有记录而启动开发流程。
 
 | 当前任务 | 默认选择 |
 | --- | --- |
@@ -118,6 +129,8 @@ Codex 通常使用 `~/.codex/AGENTS.md`，Claude Code 使用 `~/.claude/CLAUDE.m
 - Choose `dev_co` by the current task's intent: load it for scoping a software/system product to build, sustained feature development, complex or multi-step repairs, and development recovery or handoff. Building or refactoring an evaluation system qualifies; verification of the current development increment stays within that workflow.
 - Do not auto-load `dev_co` for standalone evaluations, benchmarks or model comparisons, results analysis, reports or research, code questions or one-off reviews, throwaway scripts, or small isolated text/configuration/bug fixes. A software repository, code execution, a current-state file, or previous `dev_co` use is not sufficient. Follow applicable project requirements without starting this workflow. Honor explicit invocation, opt-out, and a user-selected primary workflow.
 - When applicable, load it before substantive development using the host's native skill-invocation tool, or read its installed `SKILL.md`. Resolve the catalog path, falling back to `~/.codex/skills/dev_co/SKILL.md` or `~/.claude/skills/dev_co/SKILL.md`; do not rely solely on implicit matching. Reuse loaded content, reloading only after changes or context loss; read references only as needed.
+- Select methods and specialist skills on the user's behalf. Mixed development tasks enter `dev_co` first; pass a concrete UI subtask to an available `compose-ui-kit` entrypoint. Reassess current capability needs when the goal, implementation domain, verification phase, or evidence changes, rather than scanning all skills each turn.
+- Carry forward the concrete goal, scope, confirmed constraints, existing artifacts, and required evidence. Do not replace a task with a bare skill menu or repeat settled discovery. Return results to the original task and keep each artifact authoritative in one place.
 - Respect every skill's explicit-only invocation policy. A reference from another skill or workflow does not authorize starting it; use the host's supported loader only after the user selects that workflow.
 ```
 
@@ -141,11 +154,17 @@ docs/archive/           已完成阶段的长记录，可选
 
 把摘要放在这份记录开头，历史通过链接追溯。换 Agent 后，先读摘要和本轮相关代码；源码仍要核实，记录负责提供意图和导航。详见[当前记忆与交接](references/memory-and-handoff.md)。
 
+多任务执行包提供简短入口和任务导航，区分启动必读、当前任务必读与遇到问题再查的材料；交接 Prompt 传递这套阅读约定。Agent 可以连续推进，按任务展开细节并在阶段出口留下可恢复状态，不默认通读全部历史或重复加载未变化内容。详细要求、跨模块依赖与必要验收仍须保留，见[执行包与阅读约定](references/memory-and-handoff.md#执行包与阅读约定)。
+
 ## 测试和开发方法怎么选
 
 局部逻辑修复从复现和相关测试开始；接口、持久化或跨模块行为变化，再补契约与集成检查；发布候选按项目要求检查核心路径。小改不默认全量 E2E，也不能以“节省时间”为由跳过项目必需检查。
 
 TDD 适合行为已经清楚、可以先复现失败的改动。需求和接口还含糊时，先写清行为、边界和验收，采用 SDD 中先明确规格的做法；小任务几行就能说清，不必额外生成一套文档。这里没有强制的 TDD / SDD 流水线。
+
+需要跨模块需求追踪、契约和长期交接时，由 Agent 判断是否采用项目可用的 Spec Kit；已有功能从当前阶段继续，普通小改不自动初始化。Spec Kit 管该功能的规格、计划和任务，dev_co 的当前记录只提供阶段与证据索引。官方阶段技能与带人工关卡的 CLI 工作流分别处理，已有人工审核不能绕过。具体前置条件与产物成本见 [Spec Kit 接入](references/specification-workflows.md)。
+
+自主迭代以可验证反馈为前提：关键上下文足够、结果可观察、预期独立于实现、范围和停止条件清楚。缺反馈时先补最小复现、样本或基线。复杂任务把验收、实现与证据关联起来，需求变化后核对影响；达成当前验收后结束这一轮，不无条件继续优化。
 
 “本地测试通过”“真实服务可用”“已经部署”“用户认可效果”分别报告。按影响选择检查的具体说明见[验证范围与失控恢复](references/verification-and-recovery.md)。
 
@@ -155,15 +174,18 @@ dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力�
 
 | 当前问题 | 选择方式 |
 | --- | --- |
-| UI 方向或整体设计需要改进 | `oil-ui`；具体配色、字体等参考用 `ui-ux-pro-max` |
+| UI 方向、界面改善或组件整合 | `compose-ui-kit` 自动选择适用设计与组件能力，接续已有约束 |
 | 前后端或服务共享接口变化 | `contract-first` |
+| 需要系统处理当前实现的根因、小步验证和代码质量 | 按任务选用 `ub-mode`，核对完整流程与工具可用性 |
 | 不知道为什么慢 | 先诊断；多方案量化优化与性能回归检测分别选对应技能 |
 | 需要安全检查 | 区分差异审查、仓库审计与已知漏洞修复 |
 | 合并冲突、数据口径、代码图谱、Figma 或文档同步 | 查相应条目，沿用当前工具与授权；合并冲突不依赖专门技能 |
 
 只读当前需要的条目和技能，不要求把表中的技能全部安装。磁盘已安装、宿主可加载和依赖工具可用分别核实；有冲突的默认提交或无上限实验规则不能扩大本轮授权。单纯读取已有术语表不启动领域建模。
 
-专项技能仍独立维护，多个宿主可以复用用户级安装。dev_co 不复制它们的全文，也不自动安装插件、改变模型或增加权限。已有目标、授权和项目记录继续使用；专项报告与实验日志作为证据链接回来。小修改保持局部，独立评测或分析不会因为表里有相关技能就变成开发任务。`lfg`、`review`、`qa` 和用户设为显式调用的技能，仍需用户明确选用。
+专项技能仍独立维护，多个宿主可以复用用户级安装。dev_co 不复制它们的全文，也不自动安装插件、改变模型或增加权限。方法选择由 Agent 完成，不要求用户选择工具名；移交具体目标、范围、已有约束、产物与完成证据，所选技能执行完整适用流程。同一阶段同一产物有一个主导流程，不同阶段可以接续多个技能。
+
+已有目标、授权和项目记录继续使用；专项报告与实验日志作为证据链接回来。目标或实施领域改变、进入验证阶段、证据暴露新缺口时重新判断当前需要的能力；普通继续工作沿用已有选择。小修改保持局部，独立评测或分析不会因为表里有相关技能就变成开发任务。`lfg`、`review`、`qa` 和用户设为显式调用的技能，仍需用户明确选用。
 
 ## 界面开发怎么检查
 
@@ -176,6 +198,8 @@ dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力�
 
 这些指导不要求统一风格：表格可以紧凑、有必要的边框，营销页可以更有表现力；留白、色阶和装饰按用途取舍。确定的一处颜色或间距修正只检查局部，CLI 和后端任务不加载界面参考。讨论保持只读，已确定的界面流程可以直接实现，无须额外设计审批、Figma 或独立原型。
 
+专业设计流程通过 `compose-ui-kit` 入口选择，本仓库不再维护一份平行设计技能表。入口不可用时，使用本指南及宿主现有能力，并如实报告没有执行的专业流程。
+
 ## 怎样贴合不同项目
 
 项目事实要能改变选择。摄影内容站应让作品和组图关系成为重点，订单后台关注履约状态和处理效率，财务 CLI 关注金额、文件契约与旧调用兼容。同一产品的公开页面和管理界面，也可以有不同的信息结构。
@@ -186,25 +210,40 @@ dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力�
 
 ## 想加一些可执行的检查
 
-日常使用可以只靠技能和现有项目记录。需要核对验证证据时，再接入辅助脚本：
+已有项目检查优先复用；缺少相应机制时，可以按当前需要接入依赖 Python 标准库的辅助脚本。
+
+新项目从建立时确定文件职责和更新关系；老项目在改动前记录接入基线，只约束后续新增和直接受影响的资料，保留无关存量与原状态格式。[仓库增量维护](references/repository-lifecycle.md)提供机器规则和四个操作：`adopt` 接入一次，`check` 检查新增文件归属/失效引用/文档更新义务，`review` 记录与当前增量和比较依据绑定的无需更新理由，`checkpoint` 在检查通过后推进基线。四个命令都传入当前 `--scope`；检查器不自动搬迁、清理或删除文件。
+
+采用通用状态记录时，在 `verification.repository_policy` 填入规则文件相对路径，同时填入对应的 `verification.repository_scope`，仓库检查即接入 gate；已有原生状态/验证器可直接调用独立命令，不需增加另一份 CURRENT。scope 表示有意义的工作线/增量，不是路径过滤器，也不需要用户每轮指定；agent 从当前记录沿用。同 scope 的小修、补资料和正常提交不重复 adopt。
+
+schema 2 基线绑定项目、scope 和 Git 来源。换分支或增量不能直接沿用；同根换 scope 的顺序是完成原验收、checkpoint、归档基线与 review 并移出活动位置、更新 scope，再于新增量修改前 adopt。旧 schema 1 保留原文件并明确报错，人工核对当前增量后再从下一起点接入，不静默升级。规则覆盖声明范围，文档语义与归属是否合理仍需 agent 判断。
 
 | 命令 | 作用 |
 | --- | --- |
 | `init` | 在确有需要、且记录不存在时初始化当前记录 |
-| `brief` | 输出有长度上限的项目摘要 |
-| `verify` | 执行事先声明的本地检查，记录结果与相关输入 |
-| `gate` | 检查声明范围内的证据是否缺失、失败或已经过期 |
+| `brief` | 按恢复章节提取长记录，保留下一步并报告缺项/截断 |
+| `verify --reuse` | 复用有效功能证据；否则执行声明的本地检查，再组合仓库结果 |
+| `gate` | 不运行测试，核对功能证据与已配置的仓库完成条件 |
 
 从仓库根目录查看用法：
 
 ```sh
 python3 scripts/project_workflow.py --help
+python3 scripts/repository_check.py --help
 python3 scripts/workflow_hooks.py --help
 ```
 
-已有记录的接入格式和可选 Hook 配置见[辅助脚本说明](references/helpers-and-hooks.md)。新记录默认按相关内容判断证据是否过期；检查依赖 Git 版本或分支时使用 `freshness: git`，旧记录省略该字段仍保持严格模式。独立的“候选想法”段落可以更新而不重跑检查，采纳后须移入有效决定。此次意图解析修复会让旧证据失效一次，只需重跑原有相关检查。
+已有记录的接入格式和可选 Hook 配置见[辅助脚本说明](references/helpers-and-hooks.md)。新记录默认按相关内容判断功能证据是否过期；检查依赖 Git 版本或分支时使用 `freshness: git`，旧记录省略该字段仍保持严格模式。Git 目录输入遵循跟踪/ignore 规则，显式真实文件优先，执行位及选中链接的实际依赖也参与核对；无 Git 项目可声明输出排除范围。
 
-子项目的 Hook 用 `--root` 指定与验证命令相同的根目录。Hook 默认不启用；配置生成、宿主加载和实际触发需要分别确认。
+独立的“候选想法”段落默认可以更新而不重跑检查，采纳后须移入有效决定。自定义进展标题用 `non_intent_sections`，与仅控制摘要的 `brief_sections` 分开。旧意图/文件指纹会失效一次，只需重跑原有相关检查。
+
+同一上下文内不重读入口，不变的输入不重复测试；建立约定只做一次，在相关变化、增量验收或交接时核对。省略 `verify` 的 `--reuse` 可显式重测。新增文件归属仍由 gate 即时检查，不因功能测试可复用而跳过。
+
+资料待补时功能检查仍会执行，返回 `verification_ready: true` 但最终 `ready: false`；只补不影响检查输入的资料后可以复用原结果。`reused: true` 仅代表复用功能证据；功能失败与资料待补的原因会同时保留。配置或基线来源错误则在执行前报错。
+
+辅助脚本采用一个工作树、一份活动基线、一个当前计划和一份 latest。复用粒度是整个计划，A、B 放在同一计划时，只改 A 也会重新执行两项；没有逐项缓存或任务调度。现有任务系统/CI 可以继续使用，最终合并版本的验收仍需交付者核对。
+
+子项目的 Hook 用 `--root` 指定与验证命令相同的根目录。Hook 默认不启用，生成配置默认只有 SessionStart；可选 `--check-on-stop` 只提醒，不从项目阶段推断当前回合需要续跑。旧无参数 Stop 配置调用新版脚本也不再强制续跑。配置生成、宿主加载和实际触发需要分别确认。
 
 `gate` 通过，只说明声明范围内的证据仍匹配。它不会自动判断测试是否充分，也不授予发布权限。脚本不隔离网络、不硬控预算、不自动脱敏日志。
 
@@ -215,6 +254,9 @@ SKILL.md                    日常加载的精简核心与按需入口
 agents/openai.yaml          Codex 展示信息和隐式调用策略
 references/                 当前环节需要时才读的详细指南
 scripts/project_workflow.py 项目摘要、检查执行和证据核对
+scripts/repository_check.py 仓库基线、文件归属、引用和文档更新义务
+scripts/context_brief.py    长记录的结构化原文摘录
+scripts/workflow_files.py   共用的文件边界与指纹
 scripts/workflow_hooks.py   可选 Hook 配置生成与事件适配
 tests/                      标准库行为测试
 evals/                      技能行为场景，修改相关规则时选跑
@@ -227,7 +269,7 @@ assets/                     封面及生成说明
 python3 -m unittest discover -s tests -v
 ```
 
-脚本测试覆盖记录兼容、证据失效与复用、失败与中断、进程清理、路径边界和子项目 Hook 事件适配。[行为评测场景](evals/README.md)用于检查 Agent 的实际动作和产物，修改相关规则时选跑，不加入每个用户项目的必跑流程。新增的专项路由场景覆盖 MySQL 只读建议、未定位瓶颈时的有界诊断，以及整理开发增量时不启动外部工单流程；它们是评测输入，新增场景或脚本测试通过均不代表这些 Agent 行为已经实测通过。
+脚本测试覆盖记录兼容、证据失效与复用、失败与中断、进程清理、输入过滤、执行位与链接覆盖、scope/分支来源、规则变化、资料与功能结果组合，以及子项目 Hook 事件适配。它们不证明大仓枚举性能、CI 检出兼容或真实宿主 Hook 已启用。[行为评测场景](evals/README.md)用于检查 Agent 的实际动作和产物，修改相关规则时选跑，不加入每个用户项目的必跑流程。专项路由场景覆盖 MySQL 只读建议、未定位瓶颈时的有界诊断，以及整理开发增量时不启动外部工单流程；它们是评测输入，新增场景或脚本测试通过均不代表这些 Agent 行为已经实测通过。
 
 曾在 Codex CLI 0.154.0、Claude Code 2.1.280 中做过有限场景试用，检查加载、接手和任务范围选择；这些结果不能证明所有模型、项目或长期协作都同样有效。Hook 的协议测试也不能代替宿主里的实际验证。
 
