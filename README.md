@@ -151,6 +151,7 @@ Codex 通常使用 `~/.codex/AGENTS.md`，Claude Code 使用 `~/.claude/CLAUDE.m
 - Do not auto-load `dev_co` for standalone evaluations, benchmarks or model comparisons, results analysis, reports or research, code questions or one-off reviews, throwaway scripts, or small isolated text/configuration/bug fixes. A software repository, code execution, a current-state file, or previous `dev_co` use is not sufficient. Follow applicable project requirements without starting this workflow. Honor explicit invocation, opt-out, and a user-selected primary workflow.
 - When applicable, load it before substantive development using the host's native skill-invocation tool, or read its installed `SKILL.md`. Resolve the catalog path, falling back to `~/.codex/skills/dev_co/SKILL.md` or `~/.claude/skills/dev_co/SKILL.md`; do not rely solely on implicit matching. Reuse loaded content, reloading only after changes or context loss; read references only as needed.
 - Select methods and specialist skills on the user's behalf. Mixed development tasks enter `dev_co` first; pass a concrete UI subtask to an available `compose-ui-kit` entrypoint. Reassess current capability needs when the goal, implementation domain, verification phase, or evidence changes, rather than scanning all skills each turn.
+- For web platform implementation, consult an available `modern-web-guidance` skill for relevant native patterns, browser compatibility, and fallbacks before choosing the implementation or adding dependencies. Keep the current development/design workflow and project browser targets; trivial copy or spacing edits do not require a lookup.
 - Carry forward the concrete goal, scope, confirmed constraints, existing artifacts, and required evidence. Do not replace a task with a bare skill menu or repeat settled discovery. Return results to the original task and keep each artifact authoritative in one place.
 - Respect every skill's explicit-only invocation policy. A reference from another skill or workflow does not authorize starting it; use the host's supported loader only after the user selects that workflow.
 ```
@@ -196,6 +197,7 @@ dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力�
 | 当前问题 | 选择方式 |
 | --- | --- |
 | UI 方向、界面改善或组件整合 | `compose-ui-kit` 自动选择适用设计与组件能力，接续已有约束 |
+| HTML/CSS 或浏览器端行为的现代实现与兼容性 | `modern-web-guidance` 查询相关原生方案与回退，保留项目浏览器目标及组件约定 |
 | 前后端或服务共享接口变化 | `contract-first` |
 | 需要系统处理当前实现的根因、小步验证和代码质量 | 按任务选用 `ub-mode`，核对完整流程与工具可用性 |
 | 不知道为什么慢 | 先诊断；多方案量化优化与性能回归检测分别选对应技能 |
@@ -220,6 +222,8 @@ dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力�
 这些指导不要求统一风格：表格可以紧凑、有必要的边框，营销页可以更有表现力；留白、色阶和装饰按用途取舍。确定的一处颜色或间距修正只检查局部，CLI 和后端任务不加载界面参考。讨论保持只读，已确定的界面流程可以直接实现，无须额外设计审批、Figma 或独立原型。
 
 专业设计流程通过 `compose-ui-kit` 入口选择，本仓库不再维护一份平行设计技能表。入口不可用时，使用本指南及宿主现有能力，并如实报告没有执行的专业流程。
+
+Web 平台实现由可用的 `modern-web-guidance` 补充具体 API、浏览器兼容性和必要回退，在选实现方案或添加依赖前按需查询；它不接管设计，也不要求替换现有组件库。调用 CLI 时关闭遥测，普通局部修改不附带全仓现代化扫描。具体分工见[Web 平台实现与兼容性](references/specialist-skills.md#web-平台实现与兼容性)。
 
 ## 怎样贴合不同项目
 

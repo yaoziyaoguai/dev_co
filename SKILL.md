@@ -38,6 +38,7 @@ description: Route and coordinate sustained software development, product scopin
 | 跨模块功能需要规格追踪，或项目已有 Spec Kit 产物需要继续 | [specification-workflows.md](references/specification-workflows.md) |
 | 交互流程或技术可行性需要代表性试验 | [prototyping.md](references/prototyping.md) |
 | 设计或明显调整界面的信息层级、操作主次、布局密度、组件状态或响应式行为 | [ui-design.md](references/ui-design.md) |
+| 实现或修改 HTML/CSS、浏览器端 JS 行为，需要现代 Web API、兼容性或回退依据 | [Web 平台实现与兼容性](references/specialist-skills.md#web-平台实现与兼容性) |
 | 编制执行包、接手、需求漂移、记忆冲突或记录结构需整理 | [memory-and-handoff.md](references/memory-and-handoff.md) |
 | 测试范围难判断、证据失效或反复失败 | [verification-and-recovery.md](references/verification-and-recovery.md) |
 | 第一版实施、阶段交付或安装发布检查 | [delivery-and-release.md](references/delivery-and-release.md) |
@@ -47,7 +48,7 @@ description: Route and coordinate sustained software development, product scopin
 
 较长参考资料先看开头的用途与章节导航，再读取所需章节及其适用约束；任务确实跨多个问题时可读多份。已有有效证据可以满足相应阶段，不重做原型或重启立项；系统、CLI 和数据管道使用契约、输入输出、性能或恢复试验，不强加界面流程。
 
-方法选择由 agent 完成，不要求用户记技能名或在工具菜单中选择。复合开发任务先由本入口保持整体目标；目标改变、进入新实施领域或验证阶段、证据暴露新缺口时，按 [专项技能导航](references/specialist-skills.md) 重新判断当前需要的能力，不每轮扫描全部技能。UI 子任务交给 `compose-ui-kit`；已选主流程和有效证据继续沿用。
+方法选择由 agent 完成，不要求用户记技能名或在工具菜单中选择。复合开发任务先由本入口保持整体目标；目标改变、进入新实施领域或验证阶段、证据暴露新缺口时，按 [专项技能导航](references/specialist-skills.md) 重新判断当前需要的能力，不每轮扫描全部技能。UI 子任务交给 `compose-ui-kit`；涉及 Web 平台实现时，在选定方案或新增依赖前按需使用 `modern-web-guidance`，将相关指南与兼容性约束带入该子任务。已选主流程和有效证据继续沿用。
 
 移交时给出具体目标、范围、已确认约束、现有产物和完成证据，读取所选技能后执行适用流程；不以裸技能名调用代替任务，也不重复访谈。先确认宿主及工具可用，不自动补装。结果、证据与未决问题回到原任务；同一产物保留一处权威来源。尊重技能实际的显式调用策略，`lfg`、`review`、`qa` 仅在用户明确选用时加载，不通过入口绕过。
 
