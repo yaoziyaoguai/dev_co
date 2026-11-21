@@ -45,13 +45,14 @@ git clone https://github.com/yaoziyaoguai/dev_co.git ~/work_space/dev_co
 cd ~/work_space/dev_co
 ```
 
-用安装脚本把两个宿主的技能入口链接到同一份源码。目标位置已有文件、目录或链接时，脚本会列出路径并退出。Hook 由用户按项目配置和启用。
+用安装脚本把两个宿主的技能入口链接到同一份源码。重跑会保留同源链接并补齐缺少的宿主。`--check` 只核对链接，其他来源的现有安装由用户检查后处理。Hook 由用户按项目配置和启用。
 
 ```sh
 python3 scripts/install_skill.py
+python3 scripts/install_skill.py --check
 ```
 
-只安装一个宿主时，加 `--host codex` 或 `--host claude`。脚本沿用 `CODEX_HOME` 和 `CLAUDE_CONFIG_DIR`，也可用 `--codex-home` 和 `--claude-home` 指定配置目录。其他环境可复制技能文件到宿主的技能目录，独立副本需要自行同步。
+只安装一个宿主时，安装和核对都传入 `--host codex` 或 `--host claude`。脚本沿用 `CODEX_HOME` 和 `CLAUDE_CONFIG_DIR`，也可用 `--codex-home` 和 `--claude-home` 指定配置目录。其他环境可将 `SKILL.md`、`LICENSE`、`agents/`、`references/` 和 `scripts/` 复制到宿主的技能目录，独立副本需要自行同步。维护者运行评测辅助命令时使用含 `evals/` 的源码仓库。
 
 OpenCode、ZCode 等其他宿主应先核实其实际技能目录、全局规则文件和原生调用方式，再链接或同步同一来源。不要把 Codex 专用元数据、工具调用名或运行权限当作其他宿主已经支持。文件同步、技能发现和实际任务执行分别验证。
 
@@ -137,7 +138,6 @@ Codex 通常使用 `~/.codex/AGENTS.md`，Claude Code 使用 `~/.claude/CLAUDE.m
 - Do not auto-load `dev_co` for standalone evaluations, benchmarks or model comparisons, results analysis, reports or research, code questions or one-off reviews, throwaway scripts, or small isolated text/configuration/bug fixes. A software repository, code execution, a current-state file, or previous `dev_co` use is not sufficient. Follow applicable project requirements without starting this workflow. Honor explicit invocation, opt-out, and a user-selected primary workflow.
 - When applicable, load it before substantive development using the host's native skill-invocation tool, or read its installed `SKILL.md`. Resolve the catalog path, falling back to `~/.codex/skills/dev_co/SKILL.md` or `~/.claude/skills/dev_co/SKILL.md`; do not rely solely on implicit matching. Reuse loaded content, reloading only after changes or context loss; read references only as needed.
 - Select methods and specialist skills on the user's behalf. Mixed development tasks enter `dev_co` first; pass a concrete UI subtask to an available `compose-ui-kit` entrypoint. Reassess current capability needs when the goal, implementation domain, verification phase, or evidence changes, rather than scanning all skills each turn.
-- For web platform implementation, consult an available `modern-web-guidance` skill for relevant native patterns, browser compatibility, and fallbacks before choosing the implementation or adding dependencies. Keep the current development/design workflow and project browser targets; trivial copy or spacing edits do not require a lookup.
 - Carry forward the concrete goal, scope, confirmed constraints, existing artifacts, and required evidence. Do not replace a task with a bare skill menu or repeat settled discovery. Return results to the original task and keep each artifact authoritative in one place.
 - Respect every skill's explicit-only invocation policy. A reference from another skill or workflow does not authorize starting it; use the host's supported loader only after the user selects that workflow.
 ```
@@ -227,11 +227,12 @@ Web 平台实现由可用的 `modern-web-guidance` 补充具体 API、浏览器�
 
 采用通用状态记录时，在 `verification.repository_policy` 填入规则文件相对路径，同时填入对应的 `verification.repository_scope`，仓库检查即接入 gate；已有原生状态/验证器可直接调用独立命令，不需增加另一份 CURRENT。scope 表示有意义的工作线/增量，不是路径过滤器，也不需要用户每轮指定；agent 从当前记录沿用。同 scope 的小修、补资料和正常提交不重复 adopt。
 
-schema 2 基线绑定项目、scope 和 Git 来源。换分支或增量不能直接沿用；同根换 scope 的顺序是完成原验收、checkpoint、归档基线与 review 并移出活动位置、更新 scope，再于新增量修改前 adopt。旧 schema 1 保留原文件并明确报错，人工核对当前增量后再从下一起点接入，不静默升级。规则覆盖声明范围，文档语义与归属是否合理仍需 agent 判断。
+schema 2 基线绑定项目、scope 和 Git 来源。同根换 scope 时先完成原验收，再用 `switch-scope --scope <旧工作线> --next-scope <新工作线>` 归档和接入，然后更新当前记录的 scope。旧 schema 1 保留原文件，人工核对当前增量后再从下一明确起点接入。规则覆盖声明范围，文档语义和归属仍需 agent 判断。
 
 | 命令 | 作用 |
 | --- | --- |
 | `init` | 在确有需要、且记录不存在时初始化当前记录 |
+| `adopt-state` | 为已有普通 Markdown 接入状态头，原文字节保持不变 |
 | `brief` | 恢复目标、约束和下一步。长记录及设置了 `brief_sections` 的短记录按章节提取 |
 | `verify --reuse` | 复用有效功能证据；否则执行声明的本地检查，再组合仓库结果 |
 | `gate` | 不运行测试，核对功能证据与已配置的仓库完成条件 |
@@ -256,9 +257,29 @@ python3 scripts/workflow_hooks.py --help
 
 辅助脚本采用一个工作树、一份活动基线、一个当前计划和一份 latest。复用粒度是整个计划，A、B 放在同一计划时，只改 A 也会重新执行两项；没有逐项缓存或任务调度。现有任务系统/CI 可以继续使用，最终合并版本的验收仍需交付者核对。
 
-两个 CLI 默认以命令的当前目录为项目根。从其他目录调用或为子项目生成 Hook 配置时，用 `--root` 明确指定同一个项目目录。Hook 默认生成 `SessionStart` 配置，覆盖 `startup`、`resume`、`clear`、`compact` 和 `fork`。摘要超过 8,000 个 UTF-8 字节时，Hook 提供记录路径和补读提示。可选 `--check-on-stop` 提醒证据缺口，续跑仍由当前请求决定。生成配置后，按宿主要求审阅并验证实际触发。
+需要轮转旧验证日志时，用 `verify --keep-runs 20` 保留最近的完整运行。当前运行和未完成的记录会保留。
+
+创建记录或基线时默认使用当前目录。CLI 和 Hook 读取已有项目时，在当前 Git 工作树内选择最近的状态或基线所在目录。用 `--root` 可固定项目目录。Hook 默认生成 `SessionStart` 配置，覆盖 `startup`、`resume`、`clear`、`compact` 和 `fork`。超过 6,000 个 UTF-8 字节的自动摘要会改为提供记录路径和补读提示。可选 `--check-on-stop` 提醒证据缺口，续跑由当前请求决定。生成配置后按宿主要求审阅并核对实际触发。
 
 `gate` 通过，只说明声明范围内的证据仍匹配。它不会自动判断测试是否充分，也不授予发布权限。脚本不隔离网络、不硬控预算、不自动脱敏日志。
+
+### 为子项目接入已有记录
+
+在 `dev_co` 源码目录运行下面的命令。将 `DEVCO_PROJECT_ROOT` 设为子项目的绝对路径，`notes/ACTIVE.md` 换成相对该子项目的已有记录路径。普通 Markdown 可先用 `adopt-state` 接入并保留原文。已有 `dev_co` 状态头时可直接运行 `brief`。
+
+```sh
+DEVCO_PROJECT_ROOT=/absolute/path/to/repo/packages/my-app
+python3 scripts/project_workflow.py adopt-state --root "$DEVCO_PROJECT_ROOT" --state notes/ACTIVE.md
+python3 scripts/project_workflow.py brief --root "$DEVCO_PROJECT_ROOT" --state notes/ACTIVE.md
+```
+
+确认 `brief` 显示了预期记录后，可为同一根目录和记录生成 `SessionStart` 配置。
+
+```sh
+python3 scripts/workflow_hooks.py --host codex --root "$DEVCO_PROJECT_ROOT" --state notes/ACTIVE.md --print-config
+```
+
+命令只输出配置片段。Codex 可合并到项目的 `.codex/hooks.json`，Claude Code 用 `--host claude` 生成并合并到项目的 `.claude/settings.json`。在相应宿主中审阅配置后，从该子项目或它的下级目录开新会话验证恢复结果。 [Hook 配置说明](references/helpers-and-hooks.md#hook先生成可审阅配置)
 
 ## 仓库结构与验证
 
@@ -272,6 +293,7 @@ scripts/repository_check.py 仓库基线、文件归属、引用和文档更新�
 scripts/context_brief.py    长记录的结构化原文摘录
 scripts/workflow_files.py   共用的文件边界与指纹
 scripts/workflow_hooks.py   可选 Hook 配置生成与事件适配
+scripts/eval_scenarios.py    准备行为评测目录并核对只读场景的文件差异
 tests/                      标准库回归测试、评测样例和文档链接检查
 evals/                      技能行为场景，修改相关规则时选跑
 assets/                     封面及生成说明
@@ -281,9 +303,17 @@ assets/                     封面及生成说明
 
 ```sh
 python3 -m unittest discover -s tests -v
+LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0 python3 -m unittest discover -s tests -v
 ```
 
 标准库测试覆盖状态兼容、证据失效与复用、进程清理、文件和链接边界、仓库基线、安装与 Hook 输出。修改路由规则时，按[行为评测说明](evals/README.md)在目标宿主选跑合成场景，检查 Agent 的实际动作和产物。
+
+### 2026-11-22 验证记录
+
+| 验证 | 实际结果 |
+| --- | --- |
+| 标准库回归 | Linux 上 Python 3.11.2 的严格 ASCII 环境通过全部 154 项。macOS 上 Python 3.12.2 通过 153 项，跳过 1 项 Linux 专属用例 |
+| 真实宿主 Hook | Codex CLI 0.166.0 和 Claude Code 2.1.330 均在临时 Git 项目中从子目录启动，读取 `--root` 和 `--state` 指定记录的独有标记。正常场景的 `Bash` 调用创建了测试文件。向 `PreToolUse` 注入 `RuntimeError` 后，脚本返回退出码 2，两个宿主都拦截了同一个工具调用 |
 
 ### 2026-11-21 验证记录
 

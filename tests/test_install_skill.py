@@ -46,6 +46,15 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(original.read_text(encoding="utf-8"), "existing skill")
         self.assertFalse(self.codex.exists())
 
+    def test_rerun_fills_missing_host_and_check_does_not_install(self):
+        self.assertEqual(self.install("--host", "codex").returncode, 0)
+        self.assertNotEqual(self.install("--check").returncode, 0)
+        self.assertFalse(self.claude.exists())
+        self.assertEqual(self.install().returncode, 0)
+        self.assertEqual(self.install().returncode, 0)
+        self.assertEqual(self.install("--check").returncode, 0)
+        self.assertEqual((self.claude / "skills/dev_co").resolve(), ROOT)
+
     def test_single_host_selection_preserves_other_hosts_broken_link(self):
         target = self.claude / "skills/dev_co"
         target.parent.mkdir(parents=True)

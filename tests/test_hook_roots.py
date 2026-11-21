@@ -30,11 +30,11 @@ class HookRootTests(unittest.TestCase):
         self.state = self.initialize(self.project, "子项目目标")
 
     def initialize(self, root, goal):
-        (root / "source.txt").write_text(goal)
+        (root / "source.txt").write_text(goal, encoding="utf-8")
         (root / "check.py").write_text(
             "from pathlib import Path\n"
-            + "assert Path('source.txt').read_text() == " + repr(goal) + "\n"
-        )
+            + "assert Path('source.txt').read_text(encoding='utf-8') == " + repr(goal) + "\n"
+        , encoding="utf-8")
         state = workflow.initialize(root, "docs/CURRENT.md", goal)
         meta, body = workflow.load_state(state)
         meta["phase"] = "build"
@@ -44,7 +44,7 @@ class HookRootTests(unittest.TestCase):
             "checks": [{"id": "local", "argv": [sys.executable, "check.py"],
                         "cost": "local", "timeout_seconds": 5}],
         }
-        state.write_text("---\n" + json.dumps(meta, ensure_ascii=False) + "\n---\n" + body)
+        state.write_text("---\n" + json.dumps(meta, ensure_ascii=False) + "\n---\n" + body, encoding="utf-8")
         return state
 
     def event(self, event):
@@ -54,7 +54,7 @@ class HookRootTests(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(SCRIPTS / "workflow_hooks.py"), "--host", "codex", *args],
             cwd=cwd or self.base, input=json.dumps(payload) if payload else None,
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, encoding="utf-8", timeout=10,
         )
 
     def assert_denied(self, result):
@@ -67,7 +67,11 @@ class HookRootTests(unittest.TestCase):
         self.assertNotIn("顶层项目目标", context)
         self.assertIn("项目：" + str(self.project), context)
 
-    def test_default_keeps_git_top_level_discovery(self):
+    def test_default_discovers_nearest_state_and_falls_back_to_top_level(self):
+        result = hooks.respond(self.event("SessionStart"))
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("子项目目标", context)
+        self.state.unlink()
         result = hooks.respond(self.event("SessionStart"))
         context = result["hookSpecificOutput"]["additionalContext"]
         self.assertIn("顶层项目目标", context)
@@ -79,6 +83,8 @@ class HookRootTests(unittest.TestCase):
                 self.assertNotIn("--root", shlex.split(command))
 
     def test_cli_reports_current_root_when_invoked_below_project(self):
+        self.state.unlink()
+        self.top_state.unlink()
         nested = self.project / "nested"
         nested.mkdir()
         for script, argv in (("project_workflow.py", ["brief"]),
@@ -117,7 +123,7 @@ class HookRootTests(unittest.TestCase):
                     [sys.executable, str(SCRIPTS / "workflow_hooks.py"), "--host", host,
                      "--root", "packages/app with spaces", "--state", "docs/CURRENT.md",
                      "--protect-tool", "publisher.send", "--print-config"],
-                    cwd=self.repo, capture_output=True, text=True, timeout=10,
+                    cwd=self.repo, capture_output=True, encoding="utf-8", timeout=10,
                 )
                 self.assertEqual(generated.returncode, 0, generated.stderr)
                 config = json.loads(generated.stdout)
@@ -126,7 +132,7 @@ class HookRootTests(unittest.TestCase):
                     self.assertEqual(command[command.index("--root") + 1], str(self.project))
                     result = subprocess.run(
                         command, cwd=self.base, input=json.dumps(self.event(event)),
-                        capture_output=True, text=True, timeout=10,
+                        capture_output=True, encoding="utf-8", timeout=10,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
                     output = json.loads(result.stdout)
@@ -141,7 +147,7 @@ class HookRootTests(unittest.TestCase):
         verified = subprocess.run(
             [sys.executable, str(SCRIPTS / "project_workflow.py"), "verify",
              "--root", str(self.project)],
-            cwd=self.base, capture_output=True, text=True, timeout=10,
+            cwd=self.base, capture_output=True, encoding="utf-8", timeout=10,
         )
         self.assertEqual(verified.returncode, 0, verified.stderr)
         self.assertTrue(json.loads(verified.stdout)["ready"])
@@ -152,13 +158,49 @@ class HookRootTests(unittest.TestCase):
         self.assertEqual(set(report["coverage"]), {"source.txt", "check.py"})
         event = self.event("PreToolUse")
         self.assertEqual(hooks.respond(event, protect=True, root=self.project), {})
-        self.assert_denied(hooks.respond(event, protect=True))
-        (self.repo / "source.txt").write_text("顶层改动")
+        self.assertEqual(hooks.respond(event, protect=True), {})
+        self.assert_denied(hooks.respond(event, protect=True, root=self.repo))
+        (self.repo / "source.txt").write_text("顶层改动", encoding="utf-8")
         self.assertEqual(hooks.respond(event, protect=True, root=self.project), {})
-        (self.project / "source.txt").write_text("子项目改动")
+        (self.project / "source.txt").write_text("子项目改动", encoding="utf-8")
         self.assert_denied(hooks.respond(event, protect=True, root=self.project))
         self.assertIn("systemMessage", hooks.respond(self.event("Stop"), root=self.project, check_on_stop=True))
         self.assertEqual(hooks.respond(self.event("Stop"), root=self.project), {})
+
+    def test_read_and_verify_commands_find_the_nearest_initialized_root(self):
+        nested = self.project / "nested"
+        nested.mkdir()
+        for root in (self.repo, self.project):
+            (root / repository.POLICY).write_text(json.dumps({"schema": 1, "paths": {"docs/": "状态"}}),
+                                                  encoding="utf-8")
+        for root in (self.repo, self.project):
+            repository.adopt(root, scope=root.name)
+        for root, marker in ((self.project, "子项目目标"), (self.repo, "顶层项目目标")):
+            with self.subTest(root=root):
+                for argv in (("project_workflow.py", "brief"), ("project_workflow.py", "verify"),
+                             ("project_workflow.py", "gate"), ("repository_check.py", "check", "--scope", root.name)):
+                    result = subprocess.run([sys.executable, str(SCRIPTS / argv[0]), *argv[1:]], cwd=nested,
+                                            capture_output=True, encoding="utf-8", timeout=10)
+                    self.assertEqual(result.returncode, 0, f"{argv}\n{result.stdout}\n{result.stderr}")
+                    if argv[1] == "brief":
+                        self.assertIn(marker, result.stdout)
+                if root == self.project:
+                    self.state.unlink()
+                    (self.project / repository.BASELINE).unlink()
+
+    def test_default_root_keeps_the_boundary_of_a_partially_configured_subproject(self):
+        policy = json.dumps({"schema": 1, "paths": {"docs/": "状态"}})
+        (self.repo / repository.POLICY).write_text(policy, encoding="utf-8")
+        repository.adopt(self.repo, scope="work")
+        result = subprocess.run([sys.executable, str(SCRIPTS / "repository_check.py"), "check", "--scope", "work"],
+                                cwd=self.project, capture_output=True, encoding="utf-8", timeout=10)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(str(self.project), json.loads(result.stderr)["error"])
+
+        self.state.unlink()
+        (self.project / repository.POLICY).write_text(policy, encoding="utf-8")
+        repository.adopt(self.project, scope="work")
+        self.assertEqual(hooks.respond(self.event("SessionStart")), {})
 
     def test_explicit_root_does_not_fall_back_to_parent_record(self):
         self.state.unlink()
@@ -190,7 +232,7 @@ class HookRootTests(unittest.TestCase):
         self.assertTrue(workflow.verify(self.project, self.state)["ready"])
         meta, body = workflow.load_state(self.state)
         meta["verification"]["inputs"] = ["../../source.txt"]
-        self.state.write_text("---\n" + json.dumps(meta) + "\n---\n" + body)
+        self.state.write_text("---\n" + json.dumps(meta) + "\n---\n" + body, encoding="utf-8")
         result = hooks.respond(event, protect=True, root=self.project)
         self.assert_denied(result)
         self.assertIn("路径必须位于项目内", result["hookSpecificOutput"]["permissionDecisionReason"])

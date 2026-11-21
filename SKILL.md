@@ -1,15 +1,15 @@
 ---
 name: dev_co
-description: Route and coordinate sustained software development, product scoping, complex repairs, and handoffs. Select specialist workflows by the current task and retain project context. Exclude standalone analysis, benchmarks, one-off scripts, and small isolated edits.
+description: Route sustained software development, product scoping, complex repairs, and handoffs. Select specialist workflows and retain current project context. Exclude standalone analysis, benchmarks, one-off scripts, and isolated edits. 用于继续开发、规划第一版、复杂修复和跨会话交接。
 ---
 
 # dev_co
 
-用于软件/系统产品规划、持续功能开发、复杂修复和开发交接，管理目标、节奏和当前记忆，并替用户选择当前需要的专项能力。首次使用和重要阶段切换时，用一句自然的话说明正在使用 dev_co、本轮结果和验证范围；普通回复不重复标签。
+用于软件/系统产品规划、持续功能开发、复杂修复和开发交接，管理目标、节奏和当前记忆。首次使用和重要阶段切换时，自然说明本轮结果与验证范围，例如“我会用 dev_co 继续订单筛选，交付可用的筛选流程并验证空结果和清除筛选。”
 
 按本轮任务意图判断适用性。独立跑评测/benchmark/模型对比、结果分析、调研报告、代码问答、单次审查、一次性脚本及孤立的小修默认不进入；位于软件仓库、有当前记录、运行代码或过去用过本技能，都不足以触发。开发/改造评测系统属于适用范围，当前开发增量的测试继续沿用。尊重明确选用、退出或其他主流程；若误加载后发现不适用，直接处理当前任务，不启动开发流程或新增项目记录。
 
-用户明确接续已有开发目标的规划、UI、审查或验收阶段时，仍由本入口衔接当前阶段，再选专项能力；本轮只读只限制动作，不将这种接续误判为独立评审。单独提出的评审仍保持独立，不能只凭已有项目记录就启动开发流程。
+用户明确接续已有开发目标的规划、UI、审查或验收阶段时，由本入口衔接当前阶段，再选专项能力，并遵守本轮只读范围。
 
 ## 核心约定
 
@@ -38,7 +38,6 @@ description: Route and coordinate sustained software development, product scopin
 | 跨模块功能需要规格追踪，或项目已有 Spec Kit 产物需要继续 | [specification-workflows.md](references/specification-workflows.md) |
 | 交互流程或技术可行性需要代表性试验 | [prototyping.md](references/prototyping.md) |
 | 设计或明显调整界面的信息层级、操作主次、布局密度、组件状态或响应式行为 | [ui-design.md](references/ui-design.md) |
-| 实现或修改 HTML/CSS、浏览器端 JS 行为，需要现代 Web API、兼容性或回退依据 | [Web 平台实现与兼容性](references/specialist-skills.md#web-平台实现与兼容性) |
 | 编制执行包、接手、需求漂移、记忆冲突或记录结构需整理 | [memory-and-handoff.md](references/memory-and-handoff.md) |
 | 测试范围难判断、证据失效或反复失败 | [verification-and-recovery.md](references/verification-and-recovery.md) |
 | 第一版实施、阶段交付或安装发布检查 | [delivery-and-release.md](references/delivery-and-release.md) |
@@ -48,7 +47,7 @@ description: Route and coordinate sustained software development, product scopin
 
 较长参考资料先看开头的用途与章节导航，再读取所需章节及其适用约束；任务确实跨多个问题时可读多份。已有有效证据可以满足相应阶段，不重做原型或重启立项；系统、CLI 和数据管道使用契约、输入输出、性能或恢复试验，不强加界面流程。
 
-方法选择由 agent 完成。复合开发任务沿用整体目标，在目标、实施领域、验证阶段或证据有变化时，按[专项技能导航](references/specialist-skills.md)判断需要的能力。UI 子任务用宿主可用的 `compose-ui-kit`，入口缺失时沿[界面指南](references/ui-design.md)和宿主现有工具推进。涉及 Web 平台实现时，在选定方案或新增依赖前按需查阅可用的 `modern-web-guidance`，将兼容性依据带入该子任务。已选主流程和有效证据继续沿用。
+方法选择由 agent 完成。复合开发任务沿用整体目标，在目标、实施领域、验证阶段或证据有变化时，按[专项技能导航](references/specialist-skills.md)判断需要的能力。UI 子任务用宿主可用的 `compose-ui-kit`，入口缺失时沿[界面指南](references/ui-design.md)和宿主现有工具推进。已选主流程和有效证据继续沿用。
 
 移交时给出具体目标、范围、已确认约束、现有产物和完成证据，读取所选技能后执行适用流程；不以裸技能名调用代替任务，也不重复访谈。先确认宿主及工具可用，不自动补装。结果、证据与未决问题回到原任务；同一产物保留一处权威来源。尊重技能实际的显式调用策略，`lfg`、`review`、`qa` 仅在用户明确选用时加载，不通过入口绕过。
 

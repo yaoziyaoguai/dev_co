@@ -35,7 +35,7 @@ class RepositoryTests(unittest.TestCase):
     def write(self, name, content):
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
 
     def adopt(self):
         self.write(repository.POLICY, json.dumps(self.policy))
@@ -216,6 +216,45 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(repository.check(self.root, custom, scope="work")["ready"])
         self.assertEqual((self.root / "docs/current.md").read_bytes(), original)
 
+    def test_library_and_cli_share_baselines_for_a_root_alias(self):
+        with tempfile.TemporaryDirectory() as location:
+            alias = Path(location) / "alias"
+            alias.symlink_to(self.root, target_is_directory=True)
+            repository.adopt(alias, scope="work")
+            self.assertTrue(self.check()["ready"])
+            self.assertTrue(repository.check(alias, scope="work")["ready"])
+
+    def test_scope_switch_archives_only_after_old_scope_checks_pass(self):
+        self.adopt()
+        self.write("src/main.py", "print('internal change')\n")
+        args = (self.root, repository.POLICY, "work", "next")
+        self.assertFalse(repository.switch_scope(*args)["ready"])
+        self.assertFalse((self.root / ".project-workflow/archive").exists())
+        repository.review(self.root, repository.POLICY, "usage", "同一对外用法", scope="work")
+        original = (self.root / repository.BASELINE).read_bytes()
+        reviews = (self.root / repository.REVIEWS).read_bytes()
+        result = repository.switch_scope(*args)
+        self.assertTrue(result["ready"])
+        archive = Path(result["archive"])
+        self.assertEqual((archive / "repository-baseline.json").read_bytes(), original)
+        self.assertEqual((archive / "repository-reviews.json").read_bytes(), reviews)
+        self.assertTrue(repository.check(self.root, scope="next")["ready"])
+
+    def test_checkpoint_does_not_revive_a_review_when_content_returns(self):
+        self.adopt()
+        original = (self.root / "src/main.py").read_bytes()
+        guide = (self.root / "README.md").read_bytes()
+        self.write("src/main.py", "print('changed')\n")
+        repository.review(self.root, repository.POLICY, "usage", "当时对外用法不变", scope="work")
+        self.assertTrue(repository.checkpoint(self.root, scope="work")["ready"])
+        (self.root / "src/main.py").write_bytes(original)
+        self.write("README.md", "# Temporary guide\n")
+        self.assertTrue(repository.checkpoint(self.root, scope="work")["ready"])
+        (self.root / "README.md").write_bytes(guide)
+        self.assertTrue(repository.checkpoint(self.root, scope="work")["ready"])
+        self.write("src/main.py", "print('changed')\n")
+        self.assertFalse(self.check()["ready"])
+
     def test_unsafe_config_and_input_symlink_fail_before_read(self):
         self.policy["updates"][0]["inputs"] = ["../outside"]
         with self.assertRaises(workflow.WorkflowError):
@@ -229,15 +268,15 @@ class RepositoryTests(unittest.TestCase):
     def test_cli_exit_codes_and_unknown_configuration_are_honest(self):
         self.adopt()
         command = [sys.executable, str(SCRIPTS / "repository_check.py"), "check", "--root", str(self.root), "--scope", "work", "--json"]
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(command, capture_output=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.write("loose.md", "unassigned")
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(command, capture_output=True, encoding="utf-8")
         self.assertEqual(result.returncode, 1)
         self.assertFalse(json.loads(result.stdout)["ready"])
         self.policy["requird"] = []
         self.write(repository.POLICY, json.dumps(self.policy))
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(command, capture_output=True, encoding="utf-8")
         self.assertEqual(result.returncode, 2)
 
     def test_review_requires_rule_before_reading_baseline(self):

@@ -2,7 +2,7 @@
 
 **按需读取：** 确实使用辅助命令或配置 Hook 时打开；常规开发和人工维护记忆无需接入脚本。
 
-章节导航：首次接入/配置字段 → `先接入已有记录`；接手摘要、检查与证据 → `四个命令`；用户选择 Hook 后 → `Hook：先生成可审阅配置`。执行时读取所选章节的完整限制，不只复制命令。
+章节导航：首次接入/配置字段 → `先接入已有记录`；接手摘要、检查与证据 → `状态与验证命令`；用户选择 Hook 后 → `Hook：先生成可审阅配置`。执行时读取所选章节的完整限制，不只复制命令。
 
 适用边界：运行脚本并读取必要输出，只有修改或排错才读实现。`brief` 有长度上限，缺失内容按需回查；`verify/gate` 只涉及声明范围，不证明验收充分或赋予发布权限。脚本不隔离网络、不硬控预算、不自动脱敏。Hook 不随技能安装启用，须保留宿主设置并按要求信任、验证。
 
@@ -18,7 +18,13 @@ Python 3.10+ 标准库，支持 macOS/Linux 的本地进程管理。命令中的
 python3 "$SKILL_ROOT/scripts/project_workflow.py" init --root "$PROJECT_ROOT" --goal "本轮要交付的结果"
 ```
 
-默认创建 `docs/CURRENT.md`，存在则拒绝覆盖。已有文档先复用；可在不丢失原文的前提下手工加入下面的 JSON frontmatter，并用 `--state docs/PROJECT.md` 指定。若原文格式不适合接入，继续人工维护原记录，无需为脚本另建一套记忆。
+`init` 默认创建 `docs/CURRENT.md`。已有普通 Markdown 可用 `adopt-state` 接入，命令保留原文字节和权限。已有可用状态头的记录可直接复用，其他 frontmatter 格式仍按原格式维护或手工接入。
+
+```sh
+python3 "$SKILL_ROOT/scripts/project_workflow.py" adopt-state --root "$PROJECT_ROOT" --state docs/PROJECT.md --phase build
+```
+
+需要配置功能检查时，按下面的示例设置该记录的 `verification`。
 
 ```markdown
 ---
@@ -61,14 +67,14 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" init --root "$PROJECT_ROOT" --
 
 `inputs` 声明检查实际依赖的项目内文件或目录，包括引用的有效规格、契约、测试和相关配置。目录只展开声明范围：
 
-- Git 工作树使用已跟踪文件和未被 Git ignore/exclude 忽略的未跟踪文件；已跟踪生成源码仍参与。Git 枚举失败会报错，不静默退回另一套范围。
+- Git 工作树使用已跟踪文件和未被 Git ignore/exclude 忽略的未跟踪文件，已跟踪生成源码仍参与。对子模块记录索引 gitlink 和干净检出的提交。声明范围内的子模块有未提交变化时，检查要求先核对其内容。Git 枚举失败会报告错误。
 - 无 Git 项目排除常见工具缓存。两种模式都可用 `verification.exclude` 额外排除目录展开结果，例如 `["src/build/", "fixtures/output.json"]`；使用规范相对路径，目录以 `/` 结尾，不支持 glob。
 - 显式声明的真实文件优先于普通缓存、Git ignore 和 `exclude`。真正依赖的 ignored 文件要逐个明确纳入；敏感路径、项目边界、状态/证据路径限制始终保留。
 - 只核对最终选中的符号链接，记录链接身份但不递归跟随。内部目标必须实际进入选中范围；整个目标目录被过滤时，仅把目录名写进 inputs 不够，须补齐真实依赖文件。外部、断裂或无法证明覆盖的链接报错，不自动读取外部内容。覆盖承诺限于声明范围，不推断构建器的全部依赖。
 
 指纹包含普通文件内容、类型和执行位，忽略修改时间。源码增删改、执行位及链接目标变化都会使相关证据失效；上限为 5,000 个选中条目、单文件 8 MB、总内容 64 MB。范围过大时选择本轮相关模块，不默认扩大上限。
 
-## 四个命令
+## 状态与验证命令
 
 ```sh
 python3 "$SKILL_ROOT/scripts/project_workflow.py" brief --root "$PROJECT_ROOT"
@@ -79,6 +85,8 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" gate --root "$PROJECT_ROOT"
 `brief` 默认返回无章节歧义的短记录全文。配置 `brief_sections` 后，短记录也按指定章节提取。提取时保留正文位置，报告截断、缺项和恢复章节同名歧义，并列出其他章节导航。按本轮问题补读相应缺口。新会话或上下文丢失时恢复一次即可。
 
 `verify --reuse` 核对功能证据；有效时返回 `reused: true`，不运行测试、不重写日志。证据失效才执行声明的 argv 并记录结果；确有重测需要时省略 `--reuse`。执行前检查配置、输入边界和仓库基线来源，非法时不启动检查；普通资料更新、归属或引用待补不会阻止功能检查。命令不启用 shell 字符串，保留子检查退出码、超时、日志和输入指纹。
+
+可用 `verify --keep-runs 20` 在新一次验证完成后清理较早的完整运行目录。它保留当前证据、未完成的运行和含自定义文件的目录。遇到验证锁时，命令会报告记录中的 PID 和运行 ID（如果可读），由使用者核对遗留锁。
 
 `gate` 不运行功能测试，组合功能证据与当前仓库检查：`verification_ready` 表示功能证据有效；配置了仓库规则时，最终 `ready` 要求它与 `repository.ready` 都为真。顶层 `reasons` 汇总两类未满足项。`reused` 只说明功能证据复用，不说明整个增量完成；仅补不影响检查输入的资料，可以复用原功能结果。
 
@@ -114,7 +122,7 @@ python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host claude --root "$PROJECT_R
 
 按需加 `--state docs/PROJECT.md`。输出只是配置片段，**不会安装或启用**。保留宿主原有 hooks，仅合并用户选择的部分，推荐先在单一试用项目启用：
 
-验证和仓库检查 CLI 省略 `--root` 时使用命令进程的当前目录。兼容旧配置，未固定根的 Hook 从事件 cwd 寻找 Git 顶层。对同一项目，尤其是 monorepo 中的子项目，在 CLI 和生成 Hook 配置时都用 `--root` 指定相同目录。状态路径、inputs 和证据都相对该目录解释。生成配置时将根固化为绝对路径，相对路径按命令进程当前目录解析。
+未固定根时，`init`、`adopt-state` 和 `adopt` 使用当前目录。其他 CLI 命令和 Hook 从工作目录向上选择最近的状态或基线所在目录；如果该目录缺少命令所需的文件，在该目录报告缺项。查找止于 Git 顶层，非 Git 项目用当前目录。可为 monorepo 子项目用 `--root` 固定根。状态路径、inputs 和证据都相对该根解释，生成配置使用绝对路径。
 
 显式根不存在或不是目录时报错。显式根存在但缺少记录时，查找范围仍限于该根。事件 cwd 经解析后必须是固定根本身或其子目录。其他项目的 SessionStart 不注入上下文，已选 PreToolUse 保护返回 deny。固定根配置用于对应项目。
 
@@ -126,7 +134,7 @@ python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host claude --root "$PROJECT_R
 
 行为：
 
-- **SessionStart**：按宿主实际发送的 `startup`、`resume`、`clear`、`compact` 或 `fork` 事件恢复记录。自动注入的整段摘要超过 8,000 个 UTF-8 字节时，只返回记录路径和补读提示，可用 `brief` 查看完整摘要。接手时核对本技能和本轮相关代码。
+- **SessionStart**：按宿主实际发送的 `startup`、`resume`、`clear`、`compact` 或 `fork` 事件恢复记录。Hook 优先注入精简的恢复章节，超过 6,000 个 UTF-8 字节时提供记录路径和补读提示。生成的 Codex 配置为该事件设置 `additionalContextLimit: 4000`，手工运行 `brief` 可查看完整摘要。
 - **Stop（可选）**：默认不生成，也不读取状态或扫描输入。明确选择每回合结束提醒时，加 `--check-on-stop` 生成对应配置；explore/shape/recover 或 needs-user/blocked/paused 跳过，其余只提醒证据缺口，不执行测试、不强制续跑。项目仍处于 build 不能证明当前回合是实施请求。旧配置若指向本次更新脚本，原来的无参数 Stop 也不再驱动续跑；需要提醒时重新审阅、生成并按宿主要求加载。
 - **可选 PreToolUse**：仅为明确选定的精确工具名，用重复的 `--protect-tool TOOL_NAME` 生成 matcher。未接入记录、读取失败或证据不满足时返回 deny。保护脚本自身遇到无法处理的异常时以退出码 2 报告。核对通过时返回空对象，让宿主继续正常权限流程。请限定工具名，以免拦截修复和验证本身。
 

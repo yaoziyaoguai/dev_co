@@ -78,8 +78,8 @@ class ReuseTests(ProjectFixture):
     def setUp(self):
         super().setUp()
         self.counter = self.root / "run-count"
-        self.counter.write_text("0")
-        with (self.root / "check.py").open("a") as output:
+        self.counter.write_text("0", encoding="utf-8")
+        with (self.root / "check.py").open("a", encoding="utf-8") as output:
             output.write("p = Path('run-count')\np.write_text(str(int(p.read_text()) + 1))\n")
 
     def test_valid_evidence_is_reused_without_running_or_rewriting_logs(self):
@@ -90,7 +90,7 @@ class ReuseTests(ProjectFixture):
             second = workflow.verify(self.root, self.state, reuse=True)
         self.assertEqual(snapshots.call_count, 1)
         self.assertTrue(second["reused"])
-        self.assertEqual(self.counter.read_text(), "1")
+        self.assertEqual(self.counter.read_text(encoding="utf-8"), "1")
         self.assertEqual(workflow.read_evidence(self.root), evidence)
 
     def test_changed_intent_invalidates_reuse_but_operational_notes_do_not(self):
@@ -101,21 +101,21 @@ class ReuseTests(ProjectFixture):
         self.meta["goal_revision"] += 1
         self.save()
         self.assertFalse(workflow.verify(self.root, self.state, reuse=True)["reused"])
-        self.assertEqual(self.counter.read_text(), "2")
+        self.assertEqual(self.counter.read_text(encoding="utf-8"), "2")
 
     def test_force_verify_still_runs_and_cli_reuse_does_not(self):
         self.verify()
         self.verify()
-        self.assertEqual(self.counter.read_text(), "2")
+        self.assertEqual(self.counter.read_text(encoding="utf-8"), "2")
         result = subprocess.run([sys.executable, str(SCRIPTS / "project_workflow.py"), "verify",
-                                 "--reuse", "--root", str(self.root)], capture_output=True, text=True)
+                                 "--reuse", "--root", str(self.root)], capture_output=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(json.loads(result.stdout)["reused"])
-        self.assertEqual(self.counter.read_text(), "2")
+        self.assertEqual(self.counter.read_text(encoding="utf-8"), "2")
 
     def test_changed_inputs_do_not_reuse_previous_success(self):
         workflow.verify(self.root, self.state, reuse=True)
-        (self.root / "src/logic.py").write_text("value = 2\n")
+        (self.root / "src/logic.py").write_text("value = 2\n", encoding="utf-8")
         with patch.object(workflow, "snapshot", wraps=workflow.snapshot) as snapshots:
             result = workflow.verify(self.root, self.state, reuse=True)
         self.assertFalse(result["reused"])
@@ -131,7 +131,7 @@ class ReuseTests(ProjectFixture):
         def write_and_edit(path, report):
             original_write(path, report)
             if path.name == "latest.json" and report["status"] == "complete":
-                (self.root / "src/logic.py").write_text("value = 2\n")
+                (self.root / "src/logic.py").write_text("value = 2\n", encoding="utf-8")
 
         with patch.object(workflow, "write_json", side_effect=write_and_edit):
             result = workflow.verify(self.root, self.state, reuse=True)
@@ -145,17 +145,45 @@ class RepositoryGateTests(ProjectFixture):
         super().setUp()
         self.policy = {"schema": 1, "paths": {"src/": "implementation", "docs/": "current context"},
                        "required": ["docs/CURRENT.md"], "links": ["docs/CURRENT.md"]}
-        (self.root / repository.POLICY).write_text(json.dumps(self.policy))
+        (self.root / repository.POLICY).write_text(json.dumps(self.policy), encoding="utf-8")
         repository.adopt(self.root, scope="work")
         self.meta["verification"]["repository_policy"] = repository.POLICY
         self.meta["verification"]["repository_scope"] = "work"
         self.save()
 
+    def test_reuse_checks_repository_once_even_when_evidence_expires(self):
+        self.assertTrue(self.verify()["ready"])
+        for expected_reuse in (True, False):
+            if not expected_reuse:
+                self.meta["goal_revision"] += 1
+                self.save()
+            with patch.object(repository, "check", wraps=repository.check) as checks:
+                result = workflow.verify(self.root, self.state, reuse=True)
+            self.assertTrue(result["ready"])
+            self.assertEqual(result["reused"], expected_reuse)
+            self.assertEqual(checks.call_count, 1)
+
+    def test_reuse_checks_the_evidence_after_repository_observation(self):
+        self.assertTrue(self.verify()["ready"])
+        check_repository = repository.check
+
+        def check_then_edit(*args, **kwargs):
+            result = check_repository(*args, **kwargs)
+            (self.root / "src/logic.py").write_text("value = 'changed'\n", encoding="utf-8")
+            return result
+
+        with patch.object(repository, "check", side_effect=check_then_edit) as checks:
+            result = workflow.verify(self.root, self.state, reuse=True)
+        self.assertFalse(result["ready"])
+        self.assertFalse(result["reused"])
+        self.assertIn("input_hash", " ".join(result["reasons"]))
+        self.assertEqual(checks.call_count, 1)
+
     def test_untracked_file_outside_test_inputs_cannot_bypass_gate_or_reuse(self):
         self.assertTrue(workflow.verify(self.root, self.state, reuse=True)["ready"])
         evidence = workflow.read_evidence(self.root)
         extra = self.root / "random-plan.md"
-        extra.write_text("a new unassigned plan")
+        extra.write_text("a new unassigned plan", encoding="utf-8")
         result = workflow.verify(self.root, self.state, reuse=True)
         self.assertFalse(result["ready"])
         self.assertIn("random-plan.md", " ".join(result["reasons"]))

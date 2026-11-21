@@ -6,7 +6,7 @@ from workflow_files import atx_heading, fence_end, fence_start
 DEFAULT_SECTIONS = ("本轮目标", "验收标准", "项目约束", "当前决定", "代码导航", "推进约定", "最近验证", "下一步")
 
 
-def summarize(body: str, selected: object = None) -> str:
+def summarize(body: str, selected: object = None, *, compact: bool = False) -> str:
     titles = list(DEFAULT_SECTIONS) if selected is None else selected
     if (not isinstance(titles, list) or not titles
             or not all(isinstance(t, str) and t.strip() for t in titles)
@@ -34,7 +34,8 @@ def summarize(body: str, selected: object = None) -> str:
             sections.append((title, start + 1, end, "\n".join(lines[start + 1:end]).strip()))
 
     selected_sections = {title: [s for s in sections if s[0] == title] for title in titles}
-    if selected is None and len(body.strip()) <= 6500 and all(len(s) <= 1 for s in selected_sections.values()):
+    if selected is None and len(body.strip()) <= (1600 if compact else 6500) and all(
+            len(s) <= 1 for s in selected_sections.values()):
         return body.strip()
 
     result = ["按恢复章节提取原文（行号相对正文）；截断、缺项或未列入的约束需按导航补读，不能据此宣称已完整接手。"]
@@ -44,7 +45,8 @@ def summarize(body: str, selected: object = None) -> str:
         result.append("正文前言：\n" + intro[:400] + ("\n[前言截断，需补读]" if len(intro) > 400 else ""))
     found = [title for title, entries in selected_sections.items() if entries]
     # 给每个恢复字段留位置，长历史不会挤掉末尾的下一步或验收。
-    allowance = max(80, (5200 - sum(len(t) for t in found)) // max(1, len(found)))
+    budget = 1200 if compact else 5200
+    allowance = max(80, (budget - sum(len(t) for t in found)) // max(1, len(found)))
     for title in found:
         entries = selected_sections[title]
         if len(entries) != 1:

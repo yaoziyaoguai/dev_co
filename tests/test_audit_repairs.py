@@ -13,9 +13,59 @@ import repository_check as repository
 
 
 class InputCoverageTests(ProjectFixture):
+    def test_gitlink_with_uninitialized_and_clean_checkout(self):
+        module = self.base / "module"
+        module.mkdir()
+
+        def git(root, *argv):
+            return subprocess.check_output(["git", "-C", str(root), "-c", "user.name=Fixture",
+                                            "-c", "user.email=fixture@example.test",
+                                            "-c", "core.hooksPath=/dev/null", *argv], encoding="utf-8").strip()
+
+        git(module, "init", "-q")
+        (module / "data.txt").write_text("first", encoding="utf-8")
+        git(module, "add", "data.txt")
+        git(module, "commit", "-qm", "First snapshot")
+        commit = git(module, "rev-parse", "HEAD")
+        git(self.root, "init", "-q")
+        vendor = self.root / "vendor"
+        vendor.mkdir()
+        git(self.root, "update-index", "--add", "--cacheinfo", "160000," + commit + ",vendor")
+        policy = {"schema": 1, "paths": {"vendor": "依赖"}, "updates": [
+            {"id": "vendor", "inputs": ["vendor"], "documents": ["docs/dependency.md"]},
+        ]}
+        (self.root / "docs/dependency.md").write_text("依赖记录", encoding="utf-8")
+        (self.root / repository.POLICY).write_text(json.dumps(policy), encoding="utf-8")
+        repository.adopt(self.root, scope="submodule")
+        self.assertTrue(repository.check(self.root, scope="submodule")["ready"])
+        self.meta["verification"]["inputs"].append("vendor")
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+
+        vendor.rmdir()
+        module.rename(vendor)
+        self.assertFalse(self.gate()["ready"])
+        self.assertFalse(repository.check(self.root, scope="submodule")["ready"])
+        self.assertTrue(self.verify()["ready"])
+        (vendor / "data.txt").write_text("dirty", encoding="utf-8")
+        self.assertIn("子模块有未提交的变化", self.cli("gate").stderr)
+        with self.assertRaisesRegex(workflow.WorkflowError, "子模块有未提交的变化"):
+            repository.check(self.root, scope="submodule")
+
+    def test_explicit_symlink_requires_its_inside_target(self):
+        link = self.root / "src/linked.py"
+        link.symlink_to("logic.py")
+        self.meta["verification"]["inputs"] = ["src/linked.py", "check.py"]
+        self.save()
+        with self.assertRaisesRegex(workflow.WorkflowError, "链接目标未进入实际验证输入"):
+            self.verify()
+        self.meta["verification"]["inputs"].append("src/logic.py")
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+
     def test_executable_bit_invalidates_success(self):
         entry = self.root / "check.sh"
-        entry.write_text("#!/bin/sh\n[ -s src/logic.py ]\n")
+        entry.write_text("#!/bin/sh\n[ -s src/logic.py ]\n", encoding="utf-8")
         entry.chmod(0o755)
         self.meta["verification"]["inputs"].append("check.sh")
         self.meta["verification"]["checks"][0]["argv"] = ["./check.sh"]
@@ -30,40 +80,40 @@ class InputCoverageTests(ProjectFixture):
     def test_directory_link_requires_actual_target_coverage(self):
         shared = self.root / "shared"
         shared.mkdir()
-        (shared / "value.txt").write_text("1")
+        (shared / "value.txt").write_text("1", encoding="utf-8")
         (self.root / "src/shared").symlink_to(shared, target_is_directory=True)
         (self.root / "check.py").write_text(
             "from pathlib import Path\nassert Path('src/shared/value.txt').read_text() == '1'\n"
-        )
+        , encoding="utf-8")
         with self.assertRaises(workflow.WorkflowError):
             self.verify()
         self.meta["verification"]["inputs"].append("shared")
         self.save()
         self.assertTrue(self.verify()["ready"])
-        (shared / "value.txt").write_text("2")
+        (shared / "value.txt").write_text("2", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
         self.assertFalse(workflow.verify(self.root, self.state, reuse=True)["ready"])
 
     def test_ignored_build_output_does_not_dirty_success(self):
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
-        (self.root / ".gitignore").write_text("src/build/\n")
-        with (self.root / "check.py").open("a") as stream:
+        (self.root / ".gitignore").write_text("src/build/\n", encoding="utf-8")
+        with (self.root / "check.py").open("a", encoding="utf-8") as stream:
             stream.write("p = Path('src/build/output.txt')\np.parent.mkdir(exist_ok=True)\np.write_text('generated')\n")
         self.assertTrue(self.verify()["ready"])
-        (self.root / "src/build/output.txt").write_text("a different build output")
+        (self.root / "src/build/output.txt").write_text("a different build output", encoding="utf-8")
         self.assertTrue(workflow.verify(self.root, self.state, reuse=True)["reused"])
-        (self.root / "src/new.py").write_text("new_source = True\n")
+        (self.root / "src/new.py").write_text("new_source = True\n", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
 
     def test_tracked_generated_file_is_still_an_input(self):
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
-        (self.root / ".gitignore").write_text("src/__pycache__/\n")
+        (self.root / ".gitignore").write_text("src/__pycache__/\n", encoding="utf-8")
         generated = self.root / "src/__pycache__/required.txt"
         generated.parent.mkdir()
-        generated.write_text("generated but versioned")
+        generated.write_text("generated but versioned", encoding="utf-8")
         subprocess.run(["git", "-C", str(self.root), "add", "-f", str(generated)], check=True)
         self.assertTrue(self.verify()["ready"])
-        generated.write_text("changed versioned input")
+        generated.write_text("changed versioned input", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
         self.assertTrue(self.verify()["ready"])
         generated.unlink()
@@ -71,7 +121,7 @@ class InputCoverageTests(ProjectFixture):
 
     def test_selected_broken_or_external_link_fails(self):
         outside = self.base / "external.txt"
-        outside.write_text("outside project")
+        outside.write_text("outside project", encoding="utf-8")
         link = self.root / "src/link"
         for target in (outside, self.root / "missing"):
             with self.subTest(target=target):
@@ -84,15 +134,15 @@ class InputCoverageTests(ProjectFixture):
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         nested = self.root / "src/nested"
         nested.mkdir()
-        (nested / "value.txt").write_text("inside")
+        (nested / "value.txt").write_text("inside", encoding="utf-8")
         subprocess.run(["git", "-C", str(self.root), "add", "src"], check=True)
         (nested / "value.txt").unlink()
         nested.rmdir()
         outside = self.base / "external"
         outside.mkdir()
-        (outside / "value.txt").write_text("synthetic outside value")
+        (outside / "value.txt").write_text("synthetic outside value", encoding="utf-8")
         nested.symlink_to(outside, target_is_directory=True)
-        (self.root / ".gitignore").write_text("src/nested\n")
+        (self.root / ".gitignore").write_text("src/nested\n", encoding="utf-8")
         with patch.object(workflow, "file_hash", wraps=workflow.file_hash) as hashing:
             with self.assertRaises(workflow.WorkflowError):
                 workflow.snapshot(self.root, ["src"], self.state)
@@ -101,10 +151,10 @@ class InputCoverageTests(ProjectFixture):
 
     def test_ignored_link_target_requires_explicit_real_files(self):
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
-        (self.root / ".gitignore").write_text("generated/\nsrc/build/\n")
+        (self.root / ".gitignore").write_text("generated/\nsrc/build/\n", encoding="utf-8")
         target = self.root / "generated/shared"
         target.mkdir(parents=True)
-        (target / "value.txt").write_text("1")
+        (target / "value.txt").write_text("1", encoding="utf-8")
         (self.root / "src/shared").symlink_to(target, target_is_directory=True)
         self.meta["verification"]["inputs"].append("generated/shared")
         self.save()
@@ -117,13 +167,13 @@ class InputCoverageTests(ProjectFixture):
         build.mkdir()
         (build / "unrelated-link").symlink_to(self.base / "missing")
         self.assertTrue(self.gate()["ready"])
-        (target / "value.txt").write_text("2")
+        (target / "value.txt").write_text("2", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
 
     def test_non_git_exclude_and_explicit_cache_file(self):
         cache = self.root / "src/__pycache__"
         cache.mkdir()
-        (cache / "required.txt").write_text("required input")
+        (cache / "required.txt").write_text("required input", encoding="utf-8")
         output = self.root / "src/build"
         output.mkdir()
         (output / "ignored-link").symlink_to(self.base / "outside")
@@ -131,7 +181,7 @@ class InputCoverageTests(ProjectFixture):
         self.meta["verification"]["inputs"].append("src/__pycache__/required.txt")
         self.save()
         self.assertTrue(self.verify()["ready"])
-        (cache / "required.txt").write_text("changed input")
+        (cache / "required.txt").write_text("changed input", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
 
     def test_custom_progress_sections_and_configuration_change(self):
@@ -165,9 +215,8 @@ class HookScopeTests(ProjectFixture):
         other = self.base / "different-project"
         other.mkdir()
         event = {"hook_event_name": "SessionStart", "cwd": str(other)}
-        response = hooks.respond(event, root=self.root)
-        self.assertNotIn("hookSpecificOutput", response)
-        self.assertIn("systemMessage", response)
+        self.assertEqual(hooks.respond(event, root=self.root), {})
+        self.assertEqual(hooks.respond({**event, "hook_event_name": "Stop"}, root=self.root, check_on_stop=True), {})
         event["hook_event_name"] = "PreToolUse"
         response = hooks.respond(event, root=self.root, protect=True)
         self.assertEqual(response["hookSpecificOutput"]["permissionDecision"], "deny")
@@ -182,11 +231,11 @@ class BaselineScopeTests(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         (self.root / "src").mkdir()
         (self.root / "docs").mkdir()
-        (self.root / "src/value.txt").write_text("1")
-        (self.root / "docs/api.md").write_text("API unchanged")
-        (self.root / "docs/other.md").write_text("Existing document")
-        (self.root / "README.md").write_text("Existing usage")
-        (self.root / ".gitignore").write_text(".project-workflow/\n")
+        (self.root / "src/value.txt").write_text("1", encoding="utf-8")
+        (self.root / "docs/api.md").write_text("API unchanged", encoding="utf-8")
+        (self.root / "docs/other.md").write_text("Existing document", encoding="utf-8")
+        (self.root / "README.md").write_text("Existing usage", encoding="utf-8")
+        (self.root / ".gitignore").write_text(".project-workflow/\n", encoding="utf-8")
         self.policy = {"schema": 1, "paths": {"src/": "source", "docs/": "docs", "README.md": "usage"},
                        "updates": [{"id": "api", "inputs": ["src/"], "documents": ["docs/api.md"]}]}
         self.save_policy()
@@ -198,10 +247,10 @@ class BaselineScopeTests(unittest.TestCase):
     def git(self, *args):
         return subprocess.run(["git", "-c", "user.name=dev_co test", "-c", "user.email=devco@example.invalid",
                                "-c", "core.hooksPath=/dev/null", "-C", str(self.root), *args],
-                              check=True, capture_output=True, text=True, timeout=10)
+                              check=True, capture_output=True, encoding="utf-8", timeout=10)
 
     def save_policy(self):
-        (self.root / repository.POLICY).write_text(json.dumps(self.policy))
+        (self.root / repository.POLICY).write_text(json.dumps(self.policy), encoding="utf-8")
 
     def test_scope_and_branch_mismatch_but_normal_commit_is_allowed(self):
         original = (self.root / repository.BASELINE).read_bytes()
@@ -211,7 +260,7 @@ class BaselineScopeTests(unittest.TestCase):
         with self.assertRaises(workflow.WorkflowError):
             repository.check(self.root, scope="A")
         self.git("checkout", "-q", "main")
-        (self.root / "README.md").write_text("Updated usage")
+        (self.root / "README.md").write_text("Updated usage", encoding="utf-8")
         self.git("add", "README.md")
         self.git("commit", "-qm", "Continue same scope")
         self.assertTrue(repository.check(self.root, scope="A")["ready"])
@@ -237,7 +286,7 @@ class BaselineScopeTests(unittest.TestCase):
 
     def test_review_cannot_transfer_to_another_scope(self):
         source = self.root / "src/value.txt"
-        source.write_text("2")
+        source.write_text("2", encoding="utf-8")
         repository.review(self.root, repository.POLICY, "api", "Internal marker; API is unchanged.", scope="A")
         old_review = (self.root / repository.REVIEWS).read_bytes()
         self.assertTrue(repository.checkpoint(self.root, scope="A")["ready"])
@@ -245,23 +294,23 @@ class BaselineScopeTests(unittest.TestCase):
         archive.mkdir(parents=True)
         (self.root / repository.BASELINE).rename(archive / "baseline.json")
         (self.root / repository.REVIEWS).rename(archive / "reviews.json")
-        source.write_text("1")
+        source.write_text("1", encoding="utf-8")
         repository.adopt(self.root, scope="B")
-        source.write_text("2")
+        source.write_text("2", encoding="utf-8")
         (self.root / repository.REVIEWS).write_bytes(old_review)
         self.assertFalse(repository.check(self.root, scope="B")["ready"])
         self.assertTrue((archive / "baseline.json").is_file())
 
     def test_review_binds_the_baseline_difference_in_same_scope(self):
         source = self.root / "src/value.txt"
-        source.write_text("2")
+        source.write_text("2", encoding="utf-8")
         repository.review(self.root, repository.POLICY, "api", "Internal marker only.", scope="A")
         old_review = (self.root / repository.REVIEWS).read_bytes()
         repository.checkpoint(self.root, scope="A")
-        source.write_text("3")
+        source.write_text("3", encoding="utf-8")
         repository.review(self.root, repository.POLICY, "api", "Another internal marker change.", scope="A")
         repository.checkpoint(self.root, scope="A")
-        source.write_text("2")
+        source.write_text("2", encoding="utf-8")
         (self.root / repository.REVIEWS).write_bytes(old_review)
         self.assertFalse(repository.check(self.root, scope="A")["ready"])
 
@@ -269,9 +318,9 @@ class BaselineScopeTests(unittest.TestCase):
         with self.assertRaises(workflow.WorkflowError):
             repository.check(self.root)
         path = self.root / repository.BASELINE
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
         value["schema"] = 1
-        path.write_text(json.dumps(value))
+        path.write_text(json.dumps(value), encoding="utf-8")
         original = path.read_bytes()
         with self.assertRaises(workflow.WorkflowError):
             repository.check(self.root, scope="A")
@@ -281,10 +330,10 @@ class BaselineScopeTests(unittest.TestCase):
 class VerificationOrderTests(ProjectFixture):
     def setUp(self):
         super().setUp()
-        (self.root / "docs/api.md").write_text("Version 1")
+        (self.root / "docs/api.md").write_text("Version 1", encoding="utf-8")
         policy = {"schema": 1, "paths": {"src/": "source", "docs/": "docs"},
                   "updates": [{"id": "api", "inputs": ["src/"], "documents": ["docs/api.md"]}]}
-        (self.root / repository.POLICY).write_text(json.dumps(policy))
+        (self.root / repository.POLICY).write_text(json.dumps(policy), encoding="utf-8")
         repository.adopt(self.root, scope="work")
         self.meta["verification"].update(repository_policy=repository.POLICY, repository_scope="work")
         self.save()
@@ -296,28 +345,28 @@ class VerificationOrderTests(ProjectFixture):
             "p = Path('.project-workflow/count.txt')\n"
             "p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1')\n"
             "assert Path('src/logic.py').read_text() == 'value = 2\\n'\n"
-        )
+        , encoding="utf-8")
 
     def test_functional_evidence_survives_pending_and_completed_documentation(self):
         self.write_counted_check()
-        (self.root / "src/logic.py").write_text("value = 2\n")
+        (self.root / "src/logic.py").write_text("value = 2\n", encoding="utf-8")
         pending = workflow.verify(self.root, self.state, reuse=True)
         self.assertTrue(pending["verification_ready"])
         self.assertFalse(pending["ready"])
-        self.assertEqual(self.count.read_text(), "1")
-        (self.root / "docs/api.md").write_text("Version 2")
+        self.assertEqual(self.count.read_text(encoding="utf-8"), "1")
+        (self.root / "docs/api.md").write_text("Version 2", encoding="utf-8")
         completed = workflow.verify(self.root, self.state, reuse=True)
         self.assertTrue(completed["ready"])
         self.assertTrue(completed["reused"])
-        self.assertEqual(self.count.read_text(), "1")
+        self.assertEqual(self.count.read_text(encoding="utf-8"), "1")
         repository.checkpoint(self.root, scope="work")
-        (self.root / "src/logic.py").write_text("value = 3\n")
+        (self.root / "src/logic.py").write_text("value = 3\n", encoding="utf-8")
         failed = workflow.verify(self.root, self.state, reuse=True)
         self.assertFalse(failed["ready"])
         self.assertFalse(failed["verification_ready"])
         self.assertTrue(any("检查未通过" in reason for reason in failed["reasons"]))
         self.assertTrue(any("更新义务" in reason for reason in failed["reasons"]))
-        self.assertEqual(self.count.read_text(), "2")
+        self.assertEqual(self.count.read_text(encoding="utf-8"), "2")
         self.assertEqual(hooks.respond(self.event("PreToolUse"), protect=True)
                          ["hookSpecificOutput"]["permissionDecision"], "deny")
 

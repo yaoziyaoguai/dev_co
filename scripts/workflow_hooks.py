@@ -10,9 +10,9 @@ import shlex
 import sys
 
 import project_workflow as workflow
-from workflow_files import configure_cli_output
+from workflow_files import configure_cli_output, filesystem_path, path_text
 
-SESSION_CONTEXT_MAX_BYTES = 8000
+SESSION_CONTEXT_MAX_BYTES = 6000
 
 
 def configured_root(root: Path) -> Path:
@@ -24,16 +24,18 @@ def configured_root(root: Path) -> Path:
 
 def config(host: str, state: str | None, protect_tools: list[str], root: Path | None = None,
            check_on_stop: bool = False) -> dict:
-    base = [sys.executable, str(Path(__file__).resolve()), "--host", host]
+    base = [path_text(sys.executable), path_text(Path(__file__).resolve()), "--host", host]
     if root is not None:
-        base.extend(["--root", str(configured_root(root))])
+        base.extend(["--root", path_text(configured_root(root))])
     if state:
         base.extend(["--state", state])
     command = shlex.join(base)
     matcher = "startup|resume|clear|compact|fork"
+    session = {"type": "command", "command": command, "timeout": 10}
+    if host == "codex":
+        session["additionalContextLimit"] = 4000
     hooks = {
-        "SessionStart": [{"matcher": matcher, "hooks": [
-            {"type": "command", "command": command, "timeout": 10}]}],
+        "SessionStart": [{"matcher": matcher, "hooks": [session]}],
     }
     if check_on_stop:
         hooks["Stop"] = [{"hooks": [{"type": "command", "command": command + " --check-on-stop", "timeout": 10}]}]
@@ -55,11 +57,16 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
         return {}
     try:
         cwd = payload.get("cwd")
-        if not isinstance(cwd, str) or not cwd or not Path(cwd).is_absolute() or not Path(cwd).is_dir():
+        if not isinstance(cwd, str) or not cwd:
             raise workflow.WorkflowError("hook 缺少有效的项目 cwd。")
-        event_directory = Path(cwd).resolve()
-        root = configured_root(root) if root is not None else workflow.project_root(event_directory)
+        directory = filesystem_path(cwd)
+        if not directory.is_absolute() or not directory.is_dir():
+            raise workflow.WorkflowError("hook 缺少有效的项目 cwd。")
+        event_directory = directory.resolve()
+        root = configured_root(root) if root is not None else workflow.project_context_root(event_directory, state_name)
         if not event_directory.is_relative_to(root):
+            if event != "PreToolUse":
+                return {}
             raise workflow.WorkflowError("事件 cwd 不属于配置的项目根；请核对该项目的 Hook 配置。")
         state = workflow.locate_state(root, state_name)
         if not state:
@@ -67,9 +74,9 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
                 raise workflow.WorkflowError("未找到指定或已接入的项目状态记录。")
             return {}
         if event == "SessionStart":
-            context = workflow.brief(root, state)
+            context = workflow.brief(root, state, compact=True)
             if len(context.encode("utf-8", errors="backslashreplace")) > SESSION_CONTEXT_MAX_BYTES:
-                context = (f"状态记录：{state}\n"
+                context = (f"状态记录：{path_text(state)}\n"
                            "自动恢复摘要超过长度预算。请读取该记录或运行 brief，核对目标、约束、验收和下一步。")
             return {"hookSpecificOutput": {"hookEventName": "SessionStart",
                     "additionalContext": context}}
@@ -100,14 +107,14 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
         if event == "PreToolUse" and protect:
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                     "permissionDecision": "deny", "permissionDecisionReason": message}}
-        return {"systemMessage": message + "。先修复记录或核对源码，不要声称已验证。"}
+        return {"systemMessage": message.rstrip("。.") + "。先修复记录或核对源码，不要声称已验证。"}
     return {}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", choices=("codex", "claude"), required=True)
-    parser.add_argument("--root", type=Path, help="与 CLI 对齐的项目根，生成配置时记录为绝对路径。省略时按事件目录寻找 Git 顶层。")
+    parser.add_argument("--root", type=Path, help="固定项目根。省略时从事件目录查找最近的已接入目录。")
     parser.add_argument("--state")
     parser.add_argument("--protect", action="store_true")
     parser.add_argument("--print-config", action="store_true")
@@ -115,14 +122,15 @@ def main() -> int:
     parser.add_argument("--check-on-stop", action="store_true", help="显式选择结束时的证据提醒；不阻止只读回合或自动续跑。")
     args = parser.parse_args()
     try:
+        state_name = path_text(args.state) if args.state else None
         if args.print_config:
-            print(json.dumps(config(args.host, args.state, args.protect_tool, args.root, args.check_on_stop),
+            print(json.dumps(config(args.host, state_name, args.protect_tool, args.root, args.check_on_stop),
                              ensure_ascii=False, indent=2))
             return 0
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("hook 输入必须为对象")
-        result = respond(payload, args.state, args.protect, args.root, args.check_on_stop)
+        result = respond(payload, state_name, args.protect, args.root, args.check_on_stop)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception as error:
@@ -134,6 +142,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.stdin.reconfigure(encoding="utf-8")
-    configure_cli_output()
+    configure_cli_output(include_stdin=True)
     raise SystemExit(main())

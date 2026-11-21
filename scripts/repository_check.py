@@ -7,14 +7,16 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from urllib.parse import unquote, urlsplit
+from uuid import uuid4
 
 import workflow_files as workflow
 
 POLICY = "devco-repository.json"
-BASELINE = ".project-workflow/repository-baseline.json"
+BASELINE = workflow.REPOSITORY_BASELINE
 REVIEWS = ".project-workflow/repository-reviews.json"
 
 
@@ -69,6 +71,7 @@ def matches(name: str, paths: list[str] | dict) -> bool:
 
 
 def inventory(root: Path, policy: dict) -> list[str]:
+    root = root.resolve()
     # Git 只枚举文件名并沿用 ignore；不会为了接入老项目读取全部源码和历史产物。
     listed = workflow.git_file_names(root, ["."])
     if listed is not None:
@@ -78,13 +81,13 @@ def inventory(root: Path, policy: dict) -> list[str]:
         for directory, dirs, files in os.walk(root, followlinks=False):
             parent = Path(directory).relative_to(root)
             dirs[:] = [d for d in dirs if d not in workflow.IGNORED
-                       and not matches((parent / d).as_posix() + "/", policy.get("ignore", []))]
-            names.update((parent / name).as_posix() for name in files)
-            names.update((parent / name).as_posix() for name in dirs if (root / parent / name).is_symlink())
+                       and not matches(workflow.path_text(parent / d) + "/", policy.get("ignore", []))]
+            names.update(workflow.path_text(parent / name) for name in files)
+            names.update(workflow.path_text(parent / name) for name in dirs if (root / parent / name).is_symlink())
     return sorted(name for name in names
                   if not set(Path(name).parts) & workflow.IGNORED
                   and not matches(name, policy.get("ignore", []))
-                  and os.path.lexists(root / name))
+                  and os.path.lexists(root / workflow.filesystem_path(name)))
 
 
 def fingerprints(root: Path, names: list[str]) -> dict:
@@ -98,6 +101,10 @@ def fingerprints(root: Path, names: list[str]) -> dict:
             result[name] = None
             continue
         if not path.is_file():
+            fingerprint = workflow.gitlink_fingerprint(root, name) if path.is_dir() else None
+            if fingerprint is not None:
+                result[name] = fingerprint
+                continue
             raise workflow.WorkflowError("需要文件：" + name)
         total += path.stat().st_size
         if path.stat().st_size > 8_000_000 or total > 64_000_000:
@@ -106,41 +113,65 @@ def fingerprints(root: Path, names: list[str]) -> dict:
     return result
 
 
-def broken_links(root: Path, sources: list[str]) -> list[list[str]]:
+def markdown_lines(path: Path):
+    fence = None
+    for line in workflow.read_text(path, 1_000_000).splitlines():
+        if fence:
+            if workflow.fence_end(line, fence):
+                fence = None
+            continue
+        fence = workflow.fence_start(line)
+        if not fence and not line.startswith(("    ", "\t")):
+            yield line
+
+
+def markdown_anchors(path: Path) -> set[str]:
+    generated, explicit = set(), set()
+    for line in markdown_lines(path):
+        explicit.update(re.findall(r'<a\s+(?:id|name)=["\']([^"\']+)["\']', line))
+        heading = workflow.atx_heading(line, max_level=6)
+        if heading:
+            title = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"\1", heading[1])
+            base = re.sub(r"[^\w -]", "", title.lower()).strip().replace(" ", "-")
+            slug, suffix = base, 1
+            while slug in generated:
+                slug = f"{base}-{suffix}"
+                suffix += 1
+            generated.add(slug)
+    return generated | explicit
+
+
+def broken_links(root: Path, sources: list[str], *, check_anchors: bool = False) -> list[list[str]]:
+    root = root.resolve()
     broken = set()
+    anchors: dict[Path, set[str]] = {}
     for name in sources:
         path = workflow.safe_path(root, name, no_symlinks=True)
         if workflow.secret_like(Path(name)):
             raise workflow.WorkflowError("引用检查不得读取凭据路径：" + name)
         if not path.is_file():
             continue  # 必须保留的入口由 required 声明；可选资料允许归档/删除。
-        fence = None
-        lines = []
-        for line in workflow.read_text(path, 1_000_000).splitlines():
-            if fence:
-                if workflow.fence_end(line, fence):
-                    fence = None
-                continue
-            fence = workflow.fence_start(line)
-            if fence or line.startswith(("    ", "\t")):
-                continue
-            lines.append(re.sub(r"(`+).*?\1", "", line))
-        text = "\n".join(lines)
+        text = "\n".join(re.sub(r"(`+).*?\1", "", line) for line in markdown_lines(path))
         targets = re.findall(r"\]\(\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^\s()]*\))+))(?:\s+[^\n)]*)?\)", text)
         targets += re.findall(r"^ {0,3}\[[^\]\n]+\]:\s*(?:<([^>\n]+)>|(\S+))", text, re.M)
         for angle, plain in targets:
             target = angle or plain
             url = urlsplit(target)
-            if url.scheme or url.netloc or not url.path or url.path.startswith("/"):
+            if url.scheme or url.netloc or url.path.startswith("/") or not (url.path or check_anchors and url.fragment):
                 continue
             try:
-                destination = (path.parent / unquote(url.path)).resolve()
-                if destination.is_relative_to(root) and destination.exists():
-                    continue
+                destination = (path.parent / workflow.filesystem_path(unquote(url.path))).resolve() if url.path else path
+                valid = destination.is_relative_to(root) and destination.exists()
             except (OSError, RuntimeError):
                 # 无法解开的符号链接也属于失效引用。
-                pass
-            broken.add((name, target))
+                valid = False
+            if (valid and check_anchors and url.fragment and destination.suffix.lower() == ".md"
+                    and destination.is_file() and not workflow.secret_like(destination.relative_to(root))):
+                if destination not in anchors:
+                    anchors[destination] = markdown_anchors(destination)
+                valid = unquote(url.fragment) in anchors[destination]
+            if not valid:
+                broken.add((name, target))
     return [list(item) for item in sorted(broken)]
 
 
@@ -161,14 +192,14 @@ def require_scope(scope: str | None) -> str:
 
 def git_origin(root: Path) -> dict | None:
     try:
-        probe = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        probe = subprocess.run(["git", "--no-optional-locks", "-C", str(root), "rev-parse", "--show-toplevel"],
                                capture_output=True, timeout=5)
         if probe.returncode != 0:
             return None
         values = {}
         for key, args in (("branch", ["symbolic-ref", "--short", "HEAD"]),
                           ("head", ["rev-parse", "--verify", "HEAD"])):
-            result = subprocess.run(["git", "-C", str(root), *args],
+            result = subprocess.run(["git", "--no-optional-locks", "-C", str(root), *args],
                                     capture_output=True, encoding="utf-8", errors="surrogateescape", timeout=5)
             values[key] = result.stdout.strip() if result.returncode == 0 else None
         return values
@@ -181,7 +212,7 @@ def git_origin(root: Path) -> dict | None:
 def load_baseline(root: Path, policy_name: str, scope: str | None = None) -> dict:
     require_scope(scope)
     baseline = load_json(root, BASELINE)
-    if (baseline.get("schema") != 2 or baseline.get("root") != str(root)
+    if (baseline.get("schema") != 2 or baseline.get("root") != workflow.path_text(root)
             or baseline.get("policy") != policy_name
             or not isinstance(baseline.get("scope"), str)
             or not isinstance(baseline.get("policy_hash"), str)
@@ -204,7 +235,7 @@ def load_baseline(root: Path, policy_name: str, scope: str | None = None) -> dic
                 raise workflow.WorkflowError("基线 Git 提交来源无法核对。")
             try:
                 ancestor = subprocess.run(
-                    ["git", "-C", str(root), "merge-base", "--is-ancestor", recorded["head"], current["head"]],
+                    ["git", "--no-optional-locks", "-C", str(root), "merge-base", "--is-ancestor", recorded["head"], current["head"]],
                     capture_output=True, timeout=5,
                 )
             except subprocess.TimeoutExpired as error:
@@ -215,12 +246,15 @@ def load_baseline(root: Path, policy_name: str, scope: str | None = None) -> dic
 
 
 def review_fingerprint(rule: dict, observed: dict, baseline: dict) -> str:
-    return workflow.digest({"root": baseline["root"], "scope": baseline["scope"],
-                            "baseline_rule": baseline["rule_hashes"].get(rule["id"]),
-                            "baseline_inputs": baseline["inputs"].get(rule["id"], {}),
-                            "baseline_documents": {p: baseline["documents"].get(p) for p in rule["documents"]},
-                            "rule": rule, "inputs": observed["inputs"][rule["id"]],
-                            "documents": {p: observed["documents"].get(p) for p in rule["documents"]}})
+    comparison = {"root": baseline["root"], "scope": baseline["scope"],
+                  "baseline_rule": baseline["rule_hashes"].get(rule["id"]),
+                  "baseline_inputs": baseline["inputs"].get(rule["id"], {}),
+                  "baseline_documents": {p: baseline["documents"].get(p) for p in rule["documents"]},
+                  "rule": rule, "inputs": observed["inputs"][rule["id"]],
+                  "documents": {p: observed["documents"].get(p) for p in rule["documents"]}}
+    if "revision" in baseline:
+        comparison["baseline_revision"] = baseline["revision"]
+    return workflow.digest(comparison)
 
 
 def pending_documents(rule: dict, baseline: dict, observed: dict) -> list[str]:
@@ -265,6 +299,7 @@ def assess(root: Path, policy: dict, baseline: dict, observed: dict) -> dict:
 
 
 def check(root: Path, policy_name: str = POLICY, *, scope: str | None = None) -> dict:
+    root = root.resolve()
     policy = load_policy(root, policy_name)
     baseline = load_baseline(root, policy_name, scope)
     return assess(root, policy, baseline, observe(root, policy))
@@ -273,14 +308,16 @@ def check(root: Path, policy_name: str = POLICY, *, scope: str | None = None) ->
 def record_baseline(root: Path, policy_name: str, policy: dict, observed: dict, scope: str) -> None:
     path = workflow.safe_path(root, BASELINE, no_symlinks=True)
     path.parent.mkdir(parents=True, exist_ok=True)
-    workflow.write_json(path, {"schema": 2, "root": str(root), "policy": policy_name,
+    workflow.write_json(path, {"schema": 2, "root": workflow.path_text(root), "policy": policy_name,
                               "scope": scope, "git_origin": git_origin(root),
+                              "revision": uuid4().hex,
                               "policy_hash": workflow.digest(policy),
                               "rule_hashes": {r["id"]: workflow.digest(r) for r in policy.get("updates", [])},
                               **observed})
 
 
 def adopt(root: Path, policy_name: str = POLICY, *, scope: str | None = None) -> dict:
+    root = root.resolve()
     scope = require_scope(scope)
     if workflow.safe_path(root, BASELINE, no_symlinks=True).exists():
         raise workflow.WorkflowError("已有基线；增量完成后使用 checkpoint，不覆盖基线掩盖问题。")
@@ -292,6 +329,7 @@ def adopt(root: Path, policy_name: str = POLICY, *, scope: str | None = None) ->
 
 
 def checkpoint(root: Path, policy_name: str = POLICY, *, scope: str | None = None) -> dict:
+    root = root.resolve()
     policy = load_policy(root, policy_name)
     baseline = load_baseline(root, policy_name, scope)
     observed = observe(root, policy)
@@ -302,7 +340,32 @@ def checkpoint(root: Path, policy_name: str = POLICY, *, scope: str | None = Non
     return result
 
 
+def switch_scope(root: Path, policy_name: str, scope: str, next_scope: str) -> dict:
+    root = root.resolve()
+    next_scope = require_scope(next_scope)
+    if scope == next_scope:
+        raise workflow.WorkflowError("请为新工作线指定不同的 --next-scope。")
+    policy = load_policy(root, policy_name)
+    baseline = load_baseline(root, policy_name, scope)
+    observed = observe(root, policy)
+    result = assess(root, policy, baseline, observed)
+    if not result["ready"]:
+        return result
+    archive = workflow.safe_path(root, ".project-workflow/archive/" + uuid4().hex, no_symlinks=True)
+    archive.mkdir(parents=True)
+    for name in (BASELINE, REVIEWS):
+        path = workflow.safe_path(root, name, no_symlinks=True)
+        if path.exists():
+            shutil.copy2(path, archive / path.name)
+    record_baseline(root, policy_name, policy, observed, next_scope)
+    workflow.safe_path(root, REVIEWS, no_symlinks=True).unlink(missing_ok=True)
+    archive_path = workflow.path_text(archive)
+    return {"ready": True, "scope": next_scope, "archive": archive_path,
+            "git_origin": git_origin(root), "message": f"已切换工作线。旧基线和核对记录归档在 {archive_path}。"}
+
+
 def review(root: Path, policy_name: str, rule_id: str | None, reason: str, *, scope: str | None = None) -> dict:
+    root = root.resolve()
     if not rule_id or not rule_id.strip():
         raise workflow.WorkflowError("review 命令需要用 --rule 指定更新规则 ID。")
     if not reason.strip():
@@ -324,22 +387,33 @@ def review(root: Path, policy_name: str, rule_id: str | None, reason: str, *, sc
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("adopt", "check", "review", "checkpoint"))
-    parser.add_argument("--root", type=Path, default=Path.cwd(), help="项目根目录，默认使用命令的当前目录。")
+    parser.add_argument("command", choices=("adopt", "check", "review", "checkpoint", "switch-scope"))
+    parser.add_argument("--root", type=Path, help="固定项目根。省略时 adopt 使用当前目录，其他命令查找最近的已接入目录。")
     parser.add_argument("--policy", default=POLICY)
     parser.add_argument("--scope", required=True, help="沿用当前工作线/增量标识；普通继续开发不更换。")
+    parser.add_argument("--next-scope", help="switch-scope 接入的新工作线。")
     parser.add_argument("--rule")
     parser.add_argument("--reason", default="")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    root = args.root.resolve()
+    root = (args.root or Path.cwd()).resolve()
     try:
         if not root.is_dir():
             raise workflow.WorkflowError("项目目录不存在。")
+        policy_name = workflow.path_text(args.policy)
+        scope = workflow.path_text(args.scope)
+        if args.root is None and args.command != "adopt":
+            from project_workflow import project_context_root
+            root = project_context_root(root)
         if args.command == "review":
-            result = review(root, args.policy, args.rule, args.reason, scope=args.scope)
+            rule = workflow.path_text(args.rule) if args.rule else None
+            result = review(root, policy_name, rule, workflow.path_text(args.reason), scope=scope)
+        elif args.command == "switch-scope":
+            if not args.next_scope or not args.next_scope.strip():
+                raise workflow.WorkflowError("switch-scope 需要 --next-scope。")
+            result = switch_scope(root, policy_name, scope, workflow.path_text(args.next_scope))
         else:
-            result = {"adopt": adopt, "check": check, "checkpoint": checkpoint}[args.command](root, args.policy, scope=args.scope)
+            result = {"adopt": adopt, "check": check, "checkpoint": checkpoint}[args.command](root, policy_name, scope=scope)
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
