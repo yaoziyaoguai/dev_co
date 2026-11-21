@@ -8,7 +8,7 @@
 
 ## Execute the first-release contract
 
-Use the accepted first-release contract and delivery target in the current project record. If missing, consult the readiness section of [new-project.md](new-project.md) to resolve the actual gap; do not reopen settled decisions. Make that complete value loop the next release candidate. Recovery covers credible blocking failures; the result is what the user actually needs. Revise the contract when evidence changes the decision, and record the reason.
+Use the accepted first-release contract and delivery target in the current project record. If missing, consult [第一版可以开始实施的条件](new-project.md#第一版可以开始实施的条件) to resolve the actual gap while carrying forward settled decisions. Make that complete value loop the next release candidate. Recovery covers credible blocking failures; the result is what the user actually needs. Revise the contract when evidence changes the decision, and record the reason.
 
 Finish this releasable loop before expanding the product surface. Do not spread implementation across multiple unfinished workflows, and do not let optional features displace release-candidate completion.
 

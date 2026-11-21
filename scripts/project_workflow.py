@@ -16,12 +16,14 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from context_brief import summarize
-from workflow_files import (IGNORED, WorkflowError, digest, file_hash, git_file_names, read_text,
-                            safe_path, secret_like, write_json)
+from workflow_files import (IGNORED, WorkflowError, atx_heading, configure_cli_output, digest,
+                            fence_end, fence_start, file_hash, git_file_names, read_text, safe_path,
+                            secret_like, write_json)
 
 WORKFLOW = "dev_co"
 ACCEPTED_WORKFLOWS = (WORKFLOW, "start-software-project")
 CANDIDATES = ("docs/CURRENT.md", "docs/PROJECT.md", "CURRENT.md")
+STATE_LIMIT = 128_000
 PHASES = {"explore", "shape", "build", "repair", "recover", "deliver"}
 STATUSES = {"active", "needs-user", "blocked", "paused", "ready", "done"}
 NON_INTENT_SECTIONS = {"最近验证", "下一步", "接手记录", "候选想法"}
@@ -32,7 +34,7 @@ def git_value(root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
             ["git", "--no-optional-locks", "-C", str(root), *args],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, encoding="utf-8", errors="surrogateescape", timeout=5,
         )
         return result.stdout.strip() if result.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
@@ -42,7 +44,10 @@ def git_value(root: Path, *args: str) -> str | None:
 def project_root(cwd: Path) -> Path:
     cwd = cwd.resolve()
     top = git_value(cwd, "rev-parse", "--show-toplevel")
-    return Path(top).resolve() if top else cwd
+    if not top:
+        return cwd
+    # 路径按文件系统编码还原，Git 分支等文本仍按 UTF-8 读取。
+    return Path(os.fsdecode(top.encode("utf-8", errors="surrogateescape"))).resolve()
 
 
 def identity(root: Path) -> dict:
@@ -66,16 +71,27 @@ def locate_state(root: Path, requested: str | None = None) -> Path | None:
             raise WorkflowError("状态记录不得使用凭据路径。")
         if not path.is_file():
             continue
-        text = read_text(path)
-        if requested or (text.startswith("---\n") and any(
-            name in text.split("\n---", 1)[0] for name in ACCEPTED_WORKFLOWS
-        )):
+        if requested:
+            return path
+        with path.open(encoding="utf-8", errors="surrogateescape") as source:
+            if source.readline(5) != "---\n":
+                continue
+            header = source.read(STATE_LIMIT).split("\n---\n", 1)[0]
+        if not header.lstrip().startswith("{"):
+            continue
+        try:
+            marker = json.loads(header).get("workflow")
+        except (ValueError, RecursionError):
+            # 保留已标记记录的错误，由 load_state 报告 JSON 或大小问题。
+            match = re.search(r'"workflow"\s*:\s*"([^"]*)"', header)
+            marker = match[1] if match else None
+        if marker in ACCEPTED_WORKFLOWS:
             return path
     return None
 
 
 def load_state(path: Path) -> tuple[dict, str]:
-    text = read_text(path)
+    text = read_text(path, STATE_LIMIT)
     if not text.startswith("---\n"):
         raise WorkflowError("状态文件需要小型 JSON frontmatter；不能直接覆盖现有文档。")
     header, separator, body = text[4:].partition("\n---\n")
@@ -83,7 +99,7 @@ def load_state(path: Path) -> tuple[dict, str]:
         raise WorkflowError("状态文件缺少 frontmatter 结束分隔符。")
     try:
         meta = json.loads(header)
-    except json.JSONDecodeError as error:
+    except (ValueError, RecursionError) as error:
         raise WorkflowError("frontmatter JSON 无效：" + str(error)) from error
     if not isinstance(meta, dict) or meta.get("workflow") not in ACCEPTED_WORKFLOWS or meta.get("schema") != 1:
         raise WorkflowError("不是已启用的 dev_co v1 状态记录。")
@@ -110,7 +126,7 @@ def intent(meta: dict, body: str) -> str:
     sections = meta.get("non_intent_sections", sorted(NON_INTENT_SECTIONS))
     for line in body.splitlines():
         if fence:
-            if re.fullmatch(r" {0,3}" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}[ \t]*", line):
+            if fence_end(line, fence):
                 fence = None
         else:
             # 缩进/容器围栏保守绑定整篇，避免列表结束后把闭围栏误作开围栏。
@@ -118,14 +134,12 @@ def intent(meta: dict, body: str) -> str:
                     or re.match(r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+|>).*?(?:`{3,}|~{3,})", line)):
                 conservative = True
                 break
-            opening = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
-            if opening and (opening[1][0] == "~" or "`" not in opening[2]):
-                fence = opening[1]
-            else:
-                heading = re.match(r"^ {0,3}(#{1,2})(?:[ \t]+(.*))?$", line)
+            fence = fence_start(line)
+            if not fence:
+                heading = atx_heading(line)
                 if heading:
-                    title = re.sub(r"[ \t]+#+[ \t]*$", "", heading[2] or "").strip()
-                    skip = heading[1] == "##" and title in sections
+                    level, title = heading
+                    skip = level == 2 and title in sections
         if not skip:
             kept.append(line)
     # 旧算法可能漏掉围栏之后的要求，不能把旧指纹直接视作已修复的证据。
@@ -307,6 +321,10 @@ def evidence_status(root: Path, state: Path, meta: dict, body: str, plan: dict) 
     if not report:
         return {"ready": False, "reasons": ["当前项目没有验证执行记录。"]}
     current = snapshot(root, plan["inputs"], state, plan.get("exclude"))
+    return compare_evidence(root, meta, body, plan, report, current)
+
+
+def compare_evidence(root: Path, meta: dict, body: str, plan: dict, report: dict, current: dict) -> dict:
     reasons = []
     expected = {"plan_hash": digest(plan),
                 "intent_hash": intent(meta, body), "input_hash": current["digest"],
@@ -349,17 +367,20 @@ def evidence_status(root: Path, state: Path, meta: dict, body: str, plan: dict) 
             "coverage": list(current["files"]), "excluded": current["excluded"]}
 
 
-def gate(root: Path, state: Path) -> dict:
-    meta, body = load_state(state)
-    plan = verification_plan(meta)
-    repository = repository_status(root, plan)
-    evidence = evidence_status(root, state, meta, body, plan)
+def combine_gate_result(evidence: dict, repository: dict | None) -> dict:
     result = {**evidence, "verification_ready": evidence["ready"]}
     if repository is not None:
         result.update(ready=evidence["ready"] and repository["ready"],
                       reasons=evidence["reasons"] + repository["reasons"],
                       repository=repository["repository"])
     return result
+
+
+def gate(root: Path, state: Path) -> dict:
+    meta, body = load_state(state)
+    plan = verification_plan(meta)
+    repository = repository_status(root, plan)
+    return combine_gate_result(evidence_status(root, state, meta, body, plan), repository)
 
 
 def execute_check(argv: list[str], root: Path, log: Path, timeout: float) -> tuple[int, bool]:
@@ -403,21 +424,24 @@ def execute_check(argv: list[str], root: Path, log: Path, timeout: float) -> tup
 
 
 def verify(root: Path, state: Path, *, reuse: bool = False) -> dict:
-    if reuse:
-        existing = gate(root, state)
-        if existing["verification_ready"]:
-            return {**existing, "reused": True}
     meta, body = load_state(state)
     plan = verification_plan(meta)
-    if not reuse:
+    repository = None
+    if reuse:
+        repository = repository_status(root, plan)
+    else:
         repository_preflight(root, plan)
     if not plan.get("checks"):
         raise WorkflowError("没有自动检查；不要为通过门槛编造测试。记录实际手工验收即可。")
+    lock = safe_path(root, ".project-workflow/verify.lock", no_symlinks=True)
+    previous = read_evidence(root) if reuse and not lock.exists() else None
     before = snapshot(root, plan["inputs"], state, plan.get("exclude"))
+    if previous:
+        existing = compare_evidence(root, meta, body, plan, previous, before)
+        if existing["ready"] and not lock.exists():
+            return {**combine_gate_result(existing, repository), "reused": True}
     before_identity = identity(root)
-    storage = safe_path(root, ".project-workflow", no_symlinks=True)
-    storage.mkdir(exist_ok=True)
-    lock = storage / "verify.lock"
+    lock.parent.mkdir(exist_ok=True)
     try:
         lock.mkdir()
     except FileExistsError as error:
@@ -483,7 +507,7 @@ def initialize(root: Path, relative: str, goal: str) -> Path:
         "\n\n## 最近验证\n尚未执行。\n\n## 下一步\n明确最影响推进的未知，并选择一个可观察的下一步。\n"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x") as output:
+    with path.open("x", encoding="utf-8") as output:
         output.write("---\n" + json.dumps(meta, ensure_ascii=False, indent=2) + "\n---\n\n" + body)
     return path
 
@@ -507,7 +531,7 @@ def brief(root: Path, state: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("init", "brief", "verify", "gate"))
-    parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--root", type=Path, default=Path.cwd(), help="项目根目录，默认使用命令的当前目录。")
     parser.add_argument("--state", help="项目内状态文档路径；不提供时识别常用位置。")
     parser.add_argument("--goal", default="待明确当前项目的本轮成果。")
     parser.add_argument("--reuse", action="store_true", help="verify 优先复用仍有效的通过证据，不重复运行检查。")
@@ -524,7 +548,7 @@ def main() -> int:
             return 0
         state = locate_state(root, args.state)
         if not state:
-            raise WorkflowError("未发现已启用的项目记录；保留已有文档，按需接入。")
+            raise WorkflowError(f"未发现已启用的项目记录。当前项目根为 {root}，请核对 --root 或已有文档的接入状态。")
         if args.command == "brief":
             print(brief(root, state))
             return 0
@@ -537,4 +561,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    configure_cli_output()
     raise SystemExit(main())

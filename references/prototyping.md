@@ -26,6 +26,8 @@ When hierarchy, action priority, density, or UI states are part of that question
 | Native APIs, media, model quality, synchronization, or performance | Focused technical spike | Whether users value the workflow |
 | Adoption or demand | Concierge/manual test; include a paid offer only for a commercial hypothesis | Product scalability |
 
+Choose from the capabilities available to the current session. When Figma is unavailable, use an existing demo, a runnable browser prototype, or a flow diagram as appropriate to the decision. When the host cannot run the interaction, record the source or contract checks performed and the user tasks that still need runtime verification.
+
 Split trials only when one artifact cannot answer the distinct questions. A polished mockup can conceal an impossible technical core; a successful technical demo can conceal an unwanted product.
 
 ## Prototype contract

@@ -10,6 +10,9 @@ import shlex
 import sys
 
 import project_workflow as workflow
+from workflow_files import configure_cli_output
+
+SESSION_CONTEXT_MAX_BYTES = 8000
 
 
 def configured_root(root: Path) -> Path:
@@ -27,7 +30,7 @@ def config(host: str, state: str | None, protect_tools: list[str], root: Path | 
     if state:
         base.extend(["--state", state])
     command = shlex.join(base)
-    matcher = "startup|resume|compact" if host == "codex" else "startup|resume|clear|compact|fork"
+    matcher = "startup|resume|clear|compact|fork"
     hooks = {
         "SessionStart": [{"matcher": matcher, "hooks": [
             {"type": "command", "command": command, "timeout": 10}]}],
@@ -63,10 +66,13 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
             if protect or state_name:
                 raise workflow.WorkflowError("未找到指定或已接入的项目状态记录。")
             return {}
-        meta, _ = workflow.load_state(state)
         if event == "SessionStart":
+            context = workflow.brief(root, state)
+            if len(context.encode("utf-8", errors="backslashreplace")) > SESSION_CONTEXT_MAX_BYTES:
+                context = (f"状态记录：{state}\n"
+                           "自动恢复摘要超过长度预算。请读取该记录或运行 brief，核对目标、约束、验收和下一步。")
             return {"hookSpecificOutput": {"hookEventName": "SessionStart",
-                    "additionalContext": workflow.brief(root, state)}}
+                    "additionalContext": context}}
         if event == "PreToolUse" and protect:
             outcome = workflow.gate(root, state)
             if not outcome["ready"]:
@@ -75,6 +81,7 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
                         "permissionDecisionReason": "项目就绪检查未通过：" + "；".join(outcome["reasons"])}}
             # 就绪检查通过只是不拦截，不能替代宿主权限或用户授权。
             return {}
+        meta, _ = workflow.load_state(state)
         if event != "Stop" or meta["phase"] in {"explore", "shape", "recover"}:
             return {}
         if meta["status"] in {"needs-user", "blocked", "paused"}:
@@ -100,7 +107,7 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", choices=("codex", "claude"), required=True)
-    parser.add_argument("--root", type=Path, help="显式项目根目录；生成配置时固化为绝对路径。")
+    parser.add_argument("--root", type=Path, help="与 CLI 对齐的项目根，生成配置时记录为绝对路径。省略时按事件目录寻找 Git 顶层。")
     parser.add_argument("--state")
     parser.add_argument("--protect", action="store_true")
     parser.add_argument("--print-config", action="store_true")
@@ -118,11 +125,15 @@ def main() -> int:
         result = respond(payload, args.state, args.protect, args.root, args.check_on_stop)
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (OSError, ValueError, TypeError, workflow.WorkflowError) as error:
-        # 保护性执行前检查无法解析时拒绝本次调用；其他事件报告错误，不制造续跑循环。
+    except Exception as error:
+        if not args.protect and not isinstance(error, (OSError, ValueError, TypeError, workflow.WorkflowError)):
+            raise
+        # 保护性 Hook 自身失败时用宿主的阻断退出码报告异常。
         print(str(error), file=sys.stderr)
         return 2 if args.protect else 1
 
 
 if __name__ == "__main__":
+    sys.stdin.reconfigure(encoding="utf-8")
+    configure_cli_output()
     raise SystemExit(main())

@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
+import sys
 from uuid import uuid4
 
 IGNORED = {".git", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".project-workflow"}
@@ -76,8 +78,33 @@ def git_file_names(root: Path, paths: list[str]) -> list[str] | None:
 
 def write_json(path: Path, value: object) -> None:
     temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def configure_cli_output() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
+def fence_start(line: str) -> str | None:
+    match = re.fullmatch(r" {0,3}(`{3,}|~{3,})(.*)", line)
+    if match and (match[1][0] == "~" or "`" not in match[2]):
+        return match[1]
+    return None
+
+
+def fence_end(line: str, marker: str) -> bool:
+    return bool(re.fullmatch(r" {0,3}" + re.escape(marker[0]) + "{" + str(len(marker)) + r",}[ \t]*", line))
+
+
+def atx_heading(line: str) -> tuple[int, str] | None:
+    match = re.fullmatch(r" {0,3}(#{1,2})(?:[ \t]+(.*))?", line)
+    if not match:
+        return None
+    title = re.sub(r"[ \t]+#+[ \t]*$", "", match[2] or "").strip()
+    return len(match[1]), title
+
 
 def secret_like(path: Path) -> bool:
     return any(p.startswith(".env") or p.lower() in {

@@ -45,27 +45,13 @@ git clone https://github.com/yaoziyaoguai/dev_co.git ~/work_space/dev_co
 cd ~/work_space/dev_co
 ```
 
-然后把两个宿主的入口链接到同一份源码。以下命令发现任一已有安装就会退出，不覆盖或移动文件；已有安装请先比较、备份，再决定是否替换。
+用安装脚本把两个宿主的技能入口链接到同一份源码。目标位置已有文件、目录或链接时，脚本会列出路径并退出。Hook 由用户按项目配置和启用。
 
 ```sh
-python3 - <<'PY'
-from pathlib import Path
-
-source = Path.cwd().resolve()
-if not (source / "SKILL.md").is_file():
-    raise SystemExit("请在 dev_co 仓库根目录执行。")
-targets = [Path.home() / host / "skills/dev_co" for host in (".codex", ".claude")]
-existing = [str(path) for path in targets if path.exists() or path.is_symlink()]
-if existing:
-    raise SystemExit("请先检查并备份已有安装：\n" + "\n".join(existing))
-for target in targets:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.symlink_to(source, target_is_directory=True)
-print("Codex 和 Claude Code 已链接到：", source)
-PY
+python3 scripts/install_skill.py
 ```
 
-使用自定义 `CODEX_HOME` 时，将 Codex 的目标改为该目录下的 `skills/dev_co`。只用一个宿主，可以只保留相应目标。其他环境可以复制技能文件到宿主的技能目录；两个独立副本需要自行同步。
+只安装一个宿主时，加 `--host codex` 或 `--host claude`。脚本沿用 `CODEX_HOME` 和 `CLAUDE_CONFIG_DIR`，也可用 `--codex-home` 和 `--claude-home` 指定配置目录。其他环境可复制技能文件到宿主的技能目录，独立副本需要自行同步。
 
 OpenCode、ZCode 等其他宿主应先核实其实际技能目录、全局规则文件和原生调用方式，再链接或同步同一来源。不要把 Codex 专用元数据、工具调用名或运行权限当作其他宿主已经支持。文件同步、技能发现和实际任务执行分别验证。
 
@@ -116,7 +102,7 @@ OpenCode、ZCode 等其他宿主应先核实其实际技能目录、全局规则
 
 ## Agent 什么时候自己决定，什么时候问你
 
-Agent 先读取现有资料、代码和可用工具，自己完成常规方法选择、文件落位及可逆的实施决定。需要界面能力时由 `compose-ui-kit` 选择专业流程；需要跨模块规格追踪时才考虑 Spec Kit。已有要求和证据继续使用，不重复访谈或让你从技能菜单里挑名字。
+Agent 先读取现有资料、代码和可用工具，自己完成常规方法选择、文件落位及可逆的实施决定。界面工作按可用的 `compose-ui-kit` 或[内置界面指南](references/ui-design.md)推进。需要跨模块规格追踪时才考虑 Spec Kit。已有要求和证据继续使用，不重复访谈或让你从技能菜单里挑名字。
 
 只有查不到、且会实质影响产品行为、范围、成本、权限或难以撤销的选择时，才提出具体问题，并给出建议和取舍。拿不准一个想法是否已经被采纳时，先保留为候选；当前明确要求决定哪些内容生效。
 
@@ -151,6 +137,7 @@ Codex 通常使用 `~/.codex/AGENTS.md`，Claude Code 使用 `~/.claude/CLAUDE.m
 - Do not auto-load `dev_co` for standalone evaluations, benchmarks or model comparisons, results analysis, reports or research, code questions or one-off reviews, throwaway scripts, or small isolated text/configuration/bug fixes. A software repository, code execution, a current-state file, or previous `dev_co` use is not sufficient. Follow applicable project requirements without starting this workflow. Honor explicit invocation, opt-out, and a user-selected primary workflow.
 - When applicable, load it before substantive development using the host's native skill-invocation tool, or read its installed `SKILL.md`. Resolve the catalog path, falling back to `~/.codex/skills/dev_co/SKILL.md` or `~/.claude/skills/dev_co/SKILL.md`; do not rely solely on implicit matching. Reuse loaded content, reloading only after changes or context loss; read references only as needed.
 - Select methods and specialist skills on the user's behalf. Mixed development tasks enter `dev_co` first; pass a concrete UI subtask to an available `compose-ui-kit` entrypoint. Reassess current capability needs when the goal, implementation domain, verification phase, or evidence changes, rather than scanning all skills each turn.
+- For web platform implementation, consult an available `modern-web-guidance` skill for relevant native patterns, browser compatibility, and fallbacks before choosing the implementation or adding dependencies. Keep the current development/design workflow and project browser targets; trivial copy or spacing edits do not require a lookup.
 - Carry forward the concrete goal, scope, confirmed constraints, existing artifacts, and required evidence. Do not replace a task with a bare skill menu or repeat settled discovery. Return results to the original task and keep each artifact authoritative in one place.
 - Respect every skill's explicit-only invocation policy. A reference from another skill or workflow does not authorize starting it; use the host's supported loader only after the user selects that workflow.
 ```
@@ -195,7 +182,8 @@ dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力�
 
 | 当前问题 | 选择方式 |
 | --- | --- |
-| UI 方向、界面改善或组件整合 | `compose-ui-kit` 自动选择适用设计与组件能力，接续已有约束 |
+| UI 方向、界面改善或组件整合 | 可用的 `compose-ui-kit` 或内置界面指南，接续已有约束 |
+| HTML/CSS 或浏览器端行为的现代实现与兼容性 | `modern-web-guidance` 查询相关原生方案与回退，保留项目浏览器目标及组件约定 |
 | 前后端或服务共享接口变化 | `contract-first` |
 | 需要系统处理当前实现的根因、小步验证和代码质量 | 按任务选用 `ub-mode`，核对完整流程与工具可用性 |
 | 不知道为什么慢 | 先诊断；多方案量化优化与性能回归检测分别选对应技能 |
@@ -221,6 +209,8 @@ dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力�
 
 专业设计流程通过 `compose-ui-kit` 入口选择，本仓库不再维护一份平行设计技能表。入口不可用时，使用本指南及宿主现有能力，并如实报告没有执行的专业流程。
 
+Web 平台实现由可用的 `modern-web-guidance` 补充具体 API、浏览器兼容性和必要回退，在选实现方案或添加依赖前按需查询；它不接管设计，也不要求替换现有组件库。调用 CLI 时关闭遥测，普通局部修改不附带全仓现代化扫描。具体分工见[Web 平台实现与兼容性](references/specialist-skills.md#web-平台实现与兼容性)。
+
 ## 怎样贴合不同项目
 
 项目事实要能改变选择。摄影内容站应让作品和组图关系成为重点，订单后台关注履约状态和处理效率，财务 CLI 关注金额、文件契约与旧调用兼容。同一产品的公开页面和管理界面，也可以有不同的信息结构。
@@ -242,11 +232,11 @@ schema 2 基线绑定项目、scope 和 Git 来源。换分支或增量不能直
 | 命令 | 作用 |
 | --- | --- |
 | `init` | 在确有需要、且记录不存在时初始化当前记录 |
-| `brief` | 按恢复章节提取长记录，保留下一步并报告缺项/截断 |
+| `brief` | 恢复目标、约束和下一步。长记录及设置了 `brief_sections` 的短记录按章节提取 |
 | `verify --reuse` | 复用有效功能证据；否则执行声明的本地检查，再组合仓库结果 |
 | `gate` | 不运行测试，核对功能证据与已配置的仓库完成条件 |
 
-从仓库根目录查看用法：
+从 `dev_co` 源码目录查看用法：
 
 ```sh
 python3 scripts/project_workflow.py --help
@@ -266,7 +256,7 @@ python3 scripts/workflow_hooks.py --help
 
 辅助脚本采用一个工作树、一份活动基线、一个当前计划和一份 latest。复用粒度是整个计划，A、B 放在同一计划时，只改 A 也会重新执行两项；没有逐项缓存或任务调度。现有任务系统/CI 可以继续使用，最终合并版本的验收仍需交付者核对。
 
-子项目的 Hook 用 `--root` 指定与验证命令相同的根目录。Hook 默认不启用，生成配置默认只有 SessionStart；可选 `--check-on-stop` 只提醒，不从项目阶段推断当前回合需要续跑。旧无参数 Stop 配置调用新版脚本也不再强制续跑。配置生成、宿主加载和实际触发需要分别确认。
+两个 CLI 默认以命令的当前目录为项目根。从其他目录调用或为子项目生成 Hook 配置时，用 `--root` 明确指定同一个项目目录。Hook 默认生成 `SessionStart` 配置，覆盖 `startup`、`resume`、`clear`、`compact` 和 `fork`。摘要超过 8,000 个 UTF-8 字节时，Hook 提供记录路径和补读提示。可选 `--check-on-stop` 提醒证据缺口，续跑仍由当前请求决定。生成配置后，按宿主要求审阅并验证实际触发。
 
 `gate` 通过，只说明声明范围内的证据仍匹配。它不会自动判断测试是否充分，也不授予发布权限。脚本不隔离网络、不硬控预算、不自动脱敏日志。
 
@@ -276,12 +266,13 @@ python3 scripts/workflow_hooks.py --help
 SKILL.md                    日常加载的精简核心与按需入口
 agents/openai.yaml          Codex 展示信息和隐式调用策略
 references/                 当前环节需要时才读的详细指南
+scripts/install_skill.py    将源码链接到选定宿主的技能目录
 scripts/project_workflow.py 项目摘要、检查执行和证据核对
 scripts/repository_check.py 仓库基线、文件归属、引用和文档更新义务
 scripts/context_brief.py    长记录的结构化原文摘录
 scripts/workflow_files.py   共用的文件边界与指纹
 scripts/workflow_hooks.py   可选 Hook 配置生成与事件适配
-tests/                      标准库行为测试
+tests/                      标准库回归测试、评测样例和文档链接检查
 evals/                      技能行为场景，修改相关规则时选跑
 assets/                     封面及生成说明
 ```
@@ -292,21 +283,19 @@ assets/                     封面及生成说明
 python3 -m unittest discover -s tests -v
 ```
 
-脚本测试覆盖记录兼容、证据失效与复用、失败与中断、进程清理、输入过滤、执行位与链接覆盖、scope/分支来源、规则变化、资料与功能结果组合，以及子项目 Hook 事件适配。它们不证明大仓枚举性能、CI 检出兼容或真实宿主 Hook 已启用。[行为评测场景](evals/README.md)用于检查 Agent 的实际动作和产物，修改相关规则时选跑，不加入每个用户项目的必跑流程。专项路由场景覆盖 MySQL 只读建议、未定位瓶颈时的有界诊断，以及整理开发增量时不启动外部工单流程；它们是评测输入，新增场景或脚本测试通过均不代表这些 Agent 行为已经实测通过。
+标准库测试覆盖状态兼容、证据失效与复用、进程清理、文件和链接边界、仓库基线、安装与 Hook 输出。修改路由规则时，按[行为评测说明](evals/README.md)在目标宿主选跑合成场景，检查 Agent 的实际动作和产物。
 
-最近一次修复验证于 **2026-11-08** 完成，对应代码提交 [`72a7fdd`](https://github.com/yaoziyaoguai/dev_co/commit/72a7fdd6ef99361bf43a11d5e729e32d852de745)：
+### 2026-11-21 验证记录
 
 | 验证 | 实际结果 |
 | --- | --- |
-| 标准库回归 | macOS、Python 3.14.7 下 115 项通过；覆盖此次基线、文件选择、证据复用和 Hook 协议修复 |
-| 两模块报价 CLI | 从新项目第一版继续增加折扣功能，共享 JSON 契约和真实 CLI 行为通过验证 |
-| 老项目保护与复用 | 历史文件、活跃运行数据哈希未变；两次仅补文档均未增加功能检查次数 |
-| 失效与拒绝路径 | 注入计算错误后报告失败；还原源码不能回退旧成功；scope 或分支错配时不启动检查 |
-| 共用安装 | Codex、Claude Code、OpenCode、ZCode 的安装链接均核验为同一源码版本；真实宿主 Hook 加载仍需单独验证 |
+| 标准库回归 | macOS 上 Python 3.12.2 全套 133 项通过，Python 3.14.7 的 39 项相关检查通过 |
+| 证据复用 | 同一临时项目中，有效证据仍只需 1 次输入快照。证据过期后的重跑从 4 次降到 3 次，写入证据后的输入变更仍会被最终检查发现 |
+| 安装 | 在临时宿主目录验证双宿主链接、单宿主选择、已有安装和损坏链接的保护 |
+| 真实宿主 Hook | 对 `ff99eb9` 的改动进行实测。Codex CLI 0.166.0 和 Claude Code 2.1.330 均在启动时读取指定子项目的记录，正常 `Bash` 调用成功。向 `PreToolUse` 注入 `RuntimeError` 后，脚本返回退出码 2，两个宿主都拦下了测试命令 |
+| Hook 配置 | `clear`、`fork` 匹配和长摘要回退通过本地测试。真实会话实测覆盖 `startup` 和选定工具的异常拦截 |
 
-演练证明上述本地流程能够连起来；大型仓库耗时、不同 CI 检出方式和真实宿主加载仍需在目标环境验证。
-
-曾在 Codex CLI 0.154.0、Claude Code 2.1.280 中做过有限场景试用，检查加载、接手和任务范围选择；这些结果不能证明所有模型、项目或长期协作都同样有效。Hook 的协议测试也不能代替宿主里的实际验证。
+此前还在本地演练了两模块报价 CLI、老项目增量维护、证据失效与 scope 错配，并核对了 Codex、Claude Code、OpenCode、ZCode 的共用安装链接。[2026-11-08 验证版本](https://github.com/yaoziyaoguai/dev_co/commit/72a7fdd6ef99361bf43a11d5e729e32d852de745)
 
 `dev_co` 的下划线是有意保留的命名。一些仅允许连字符的通用模板校验器会拒绝它，上述两个宿主已验证可以加载。
 

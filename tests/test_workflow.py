@@ -1,7 +1,9 @@
 """Behavioral tests for local evidence and host adapters; no external services."""
 from __future__ import annotations
 
+import io
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -15,6 +17,7 @@ from unittest.mock import patch
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import project_workflow as workflow
+import repository_check as repository
 import workflow_hooks as hooks
 
 
@@ -80,6 +83,20 @@ class EvidenceTests(ProjectFixture):
         self.assertEqual(workflow.locate_state(self.root, "notes/active.md"), custom)
         self.state.write_text("# User's existing document\nDo not rewrite.\n")
         self.assertIsNone(workflow.locate_state(self.root))
+
+    def test_auto_detection_skips_ordinary_candidates_before_enabled_state(self):
+        active = self.state.with_name("PROJECT.md")
+        original = self.state.read_bytes()
+        active.write_bytes(original)
+        for ordinary in ("---\ntitle: dev_co notes\n---\n" + "x" * 150_000,
+                         '---\n{"title":"dev_co notes","settings":{"workflow":"dev_co"}}\n---\n',
+                         "# Ordinary project notes\n" + "x" * 150_000):
+            with self.subTest(prefix=ordinary[:36]):
+                self.state.write_text(ordinary, encoding="utf-8")
+                self.assertEqual(workflow.locate_state(self.root), active)
+                result = hooks.respond(self.event("SessionStart"))
+                self.assertIn(str(active), result["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(active.read_bytes(), original)
 
     def test_existing_records_remain_usable_after_skill_rename(self):
         self.assertEqual(self.meta["workflow"], "dev_co")
@@ -524,8 +541,10 @@ class EvidenceTests(ProjectFixture):
             target.truncate(8_000_001)
         with self.assertRaises(workflow.WorkflowError):
             self.verify()
-        self.state.write_text("x" * 128_001)
-        with self.assertRaises(workflow.WorkflowError):
+        with self.state.open("a", encoding="utf-8") as output:
+            output.write("x" * 128_001)
+        self.assertEqual(workflow.locate_state(self.root), self.state)
+        with self.assertRaisesRegex(workflow.WorkflowError, "文件过大"):
             workflow.load_state(self.state)
 
     def test_cli_exit_status_distinguishes_success_missing_and_error(self):
@@ -534,6 +553,33 @@ class EvidenceTests(ProjectFixture):
         self.assertEqual(self.cli("gate").returncode, 0)
         self.state.write_text("broken")
         self.assertEqual(self.cli("gate").returncode, 2)
+
+    def test_commands_keep_utf8_state_and_output_in_ascii_locale(self):
+        subprocess.run(["git", "init", "-q", "-b", "工作线", str(self.root)], check=True)
+        self.meta["verification"]["checks"][0]["id"] = "局部验证"
+        self.save()
+        (self.root / repository.POLICY).write_text(json.dumps({"schema": 1, "paths": {"src/": "实现"}}),
+                                                  encoding="utf-8")
+        locale_env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONIOENCODING": ""}
+
+        def run(script, *argv, payload=None):
+            result = subprocess.run([sys.executable, str(SCRIPTS / script), *argv], cwd=self.root,
+                                    env=locale_env, input=payload, capture_output=True,
+                                    encoding="utf-8", timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+
+        run("project_workflow.py", "init", "--state", "docs/OTHER.md")
+        self.assertIn("本轮目标", (self.root / "docs/OTHER.md").read_text(encoding="utf-8"))
+        self.assertIn("验证局部行为", run("project_workflow.py", "brief"))
+        self.assertTrue(json.loads(run("project_workflow.py", "verify"))["ready"])
+        self.assertEqual(workflow.read_evidence(self.root)["checks"][0]["id"], "局部验证")
+        self.assertTrue(json.loads(run("project_workflow.py", "gate"))["ready"])
+        run("repository_check.py", "adopt", "--scope", "work")
+        self.assertIn("工作线", run("repository_check.py", "check", "--scope", "work"))
+        event = json.dumps(self.event("SessionStart"), ensure_ascii=False)
+        response = run("workflow_hooks.py", "--host", "codex", payload=event)
+        self.assertIn("验证局部行为", json.loads(response)["hookSpecificOutput"]["additionalContext"])
 
 
 class HookTests(ProjectFixture):
@@ -548,6 +594,24 @@ class HookTests(ProjectFixture):
         result = hooks.respond(self.event("SessionStart"))
         self.assertIn("验证局部行为", result["hookSpecificOutput"]["additionalContext"])
         self.assertFalse((self.root / ".project-workflow").exists())
+
+    def test_session_start_matches_all_supported_sources(self):
+        for host in ("codex", "claude"):
+            matcher = hooks.config(host, None, [])["hooks"]["SessionStart"][0]["matcher"]
+            for source in ("startup", "resume", "clear", "compact", "fork"):
+                with self.subTest(host=host, source=source):
+                    self.assertIsNotNone(re.fullmatch(matcher, source))
+
+    def test_session_start_points_to_state_when_full_context_exceeds_budget(self):
+        self.body += "历史记录。" * 1000
+        self.save()
+        self.assertGreater(len(workflow.brief(self.root, self.state).encode("utf-8")), 8000)
+        result = hooks.respond(self.event("SessionStart"))
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(context.encode("utf-8")), 8000)
+        self.assertIn(str(self.state), context)
+        self.assertIn("读取该记录", context)
+        self.assertNotIn("历史记录。", context)
 
     def test_stop_defaults_to_no_work_even_when_project_is_building(self):
         with patch.object(workflow, "gate") as gate, patch.object(workflow, "load_state") as load:
@@ -632,6 +696,15 @@ class HookTests(ProjectFixture):
         result = subprocess.run([sys.executable, str(SCRIPTS / "workflow_hooks.py"), "--host", "codex", "--protect"],
                                 input="not json", capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 2)
+
+    def test_unexpected_protected_cli_error_returns_blocking_status(self):
+        argv = ["workflow_hooks.py", "--host", "codex", "--protect"]
+        payload = io.StringIO(json.dumps(self.event("PreToolUse")))
+        with (patch.object(workflow, "gate", side_effect=RuntimeError("synthetic read failure")),
+              patch.object(sys, "argv", argv), patch.object(sys, "stdin", payload),
+              patch.object(sys, "stderr", io.StringIO()) as stderr):
+            self.assertEqual(hooks.main(), 2)
+        self.assertIn("synthetic read failure", stderr.getvalue())
 
 
 if __name__ == "__main__":

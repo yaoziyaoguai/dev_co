@@ -2,6 +2,8 @@
 
 [scenarios.json](scenarios.json) 是技能维护者使用的小型样本集。它检查 agent 是否把规则用在正确的任务上，不给用户项目增加必跑流程，也不替代辅助脚本的单元测试。
 
+仓库单元测试会核对场景结构、唯一 ID、初始文件路径和维护文档的本地文件链接。实际行为仍按下文使用目标宿主运行。
+
 修改触发范围时选跑 `standalone_evaluation`、`sustained_development`；修改记忆规则时选跑 `goal_change`、`handoff`；修改流程或验证要求时选跑 `read_only_discussion`、`settled_local_app`、`scoped_fix`。一次结果只能说明该宿主、模型和技能版本在这个场景中的表现。
 
 修改界面指南时选跑 `ui_read_only_discussion`、`ui_filtered_empty`，分别检查只读设计判断和真实状态恢复；涉及加载边界时再选 `sustained_development`、`scoped_fix`。界面场景需区分源码建议、实际视觉和交互证据，缺少浏览器不能记为实际交互通过。
