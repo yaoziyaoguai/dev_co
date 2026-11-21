@@ -49,9 +49,10 @@ cd ~/work_space/dev_co
 
 ```sh
 python3 scripts/install_skill.py
+python3 scripts/install_skill.py --check
 ```
 
-只安装一个宿主时，加 `--host codex` 或 `--host claude`。脚本沿用 `CODEX_HOME` 和 `CLAUDE_CONFIG_DIR`，也可用 `--codex-home` 和 `--claude-home` 指定配置目录。其他环境可将 `SKILL.md`、`LICENSE`、`agents/`、`references/` 和 `scripts/` 复制到宿主的技能目录，独立副本需要自行同步。维护者运行评测辅助命令时使用含 `evals/` 的源码仓库。
+只安装一个宿主时，安装和核对都传入 `--host codex` 或 `--host claude`。脚本沿用 `CODEX_HOME` 和 `CLAUDE_CONFIG_DIR`，也可用 `--codex-home` 和 `--claude-home` 指定配置目录。其他环境可将 `SKILL.md`、`LICENSE`、`agents/`、`references/` 和 `scripts/` 复制到宿主的技能目录，独立副本需要自行同步。维护者运行评测辅助命令时使用含 `evals/` 的源码仓库。
 
 OpenCode、ZCode 等其他宿主应先核实其实际技能目录、全局规则文件和原生调用方式，再链接或同步同一来源。不要把 Codex 专用元数据、工具调用名或运行权限当作其他宿主已经支持。文件同步、技能发现和实际任务执行分别验证。
 
@@ -261,6 +262,24 @@ python3 scripts/workflow_hooks.py --help
 创建记录或基线时默认使用当前目录。CLI 和 Hook 读取已有项目时，在当前 Git 工作树内选择最近的状态或基线所在目录。用 `--root` 可固定项目目录。Hook 默认生成 `SessionStart` 配置，覆盖 `startup`、`resume`、`clear`、`compact` 和 `fork`。超过 6,000 个 UTF-8 字节的自动摘要会改为提供记录路径和补读提示。可选 `--check-on-stop` 提醒证据缺口，续跑由当前请求决定。生成配置后按宿主要求审阅并核对实际触发。
 
 `gate` 通过，只说明声明范围内的证据仍匹配。它不会自动判断测试是否充分，也不授予发布权限。脚本不隔离网络、不硬控预算、不自动脱敏日志。
+
+### 为子项目接入已有记录
+
+在 `dev_co` 源码目录运行下面的命令。将 `DEVCO_PROJECT_ROOT` 设为子项目的绝对路径，`notes/ACTIVE.md` 换成相对该子项目的已有记录路径。普通 Markdown 可先用 `adopt-state` 接入并保留原文。已有 `dev_co` 状态头时可直接运行 `brief`。
+
+```sh
+DEVCO_PROJECT_ROOT=/absolute/path/to/repo/packages/my-app
+python3 scripts/project_workflow.py adopt-state --root "$DEVCO_PROJECT_ROOT" --state notes/ACTIVE.md
+python3 scripts/project_workflow.py brief --root "$DEVCO_PROJECT_ROOT" --state notes/ACTIVE.md
+```
+
+确认 `brief` 显示了预期记录后，可为同一根目录和记录生成 `SessionStart` 配置。
+
+```sh
+python3 scripts/workflow_hooks.py --host codex --root "$DEVCO_PROJECT_ROOT" --state notes/ACTIVE.md --print-config
+```
+
+命令只输出配置片段。Codex 可合并到项目的 `.codex/hooks.json`，Claude Code 用 `--host claude` 生成并合并到项目的 `.claude/settings.json`。在相应宿主中审阅配置后，从该子项目或它的下级目录开新会话验证恢复结果。 [Hook 配置说明](references/helpers-and-hooks.md#hook先生成可审阅配置)
 
 ## 仓库结构与验证
 
