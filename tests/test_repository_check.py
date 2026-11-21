@@ -240,6 +240,14 @@ class RepositoryTests(unittest.TestCase):
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
 
+    def test_review_requires_rule_before_reading_baseline(self):
+        result = subprocess.run([sys.executable, str(SCRIPTS / "repository_check.py"), "review",
+                                 "--root", str(self.root), "--scope", "work", "--reason", "reviewed"],
+                                capture_output=True, encoding="utf-8", timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--rule", json.loads(result.stderr)["error"])
+        self.assertFalse((self.root / repository.REVIEWS).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

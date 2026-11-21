@@ -302,7 +302,9 @@ def checkpoint(root: Path, policy_name: str = POLICY, *, scope: str | None = Non
     return result
 
 
-def review(root: Path, policy_name: str, rule_id: str, reason: str, *, scope: str | None = None) -> dict:
+def review(root: Path, policy_name: str, rule_id: str | None, reason: str, *, scope: str | None = None) -> dict:
+    if not rule_id or not rule_id.strip():
+        raise workflow.WorkflowError("review 命令需要用 --rule 指定更新规则 ID。")
     if not reason.strip():
         raise workflow.WorkflowError("需要说明为何当前输入变化不要求修改文档。")
     policy = load_policy(root, policy_name)

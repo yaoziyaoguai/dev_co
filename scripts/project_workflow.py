@@ -321,6 +321,10 @@ def evidence_status(root: Path, state: Path, meta: dict, body: str, plan: dict) 
     if not report:
         return {"ready": False, "reasons": ["当前项目没有验证执行记录。"]}
     current = snapshot(root, plan["inputs"], state, plan.get("exclude"))
+    return compare_evidence(root, meta, body, plan, report, current)
+
+
+def compare_evidence(root: Path, meta: dict, body: str, plan: dict, report: dict, current: dict) -> dict:
     reasons = []
     expected = {"plan_hash": digest(plan),
                 "intent_hash": intent(meta, body), "input_hash": current["digest"],
@@ -363,17 +367,20 @@ def evidence_status(root: Path, state: Path, meta: dict, body: str, plan: dict) 
             "coverage": list(current["files"]), "excluded": current["excluded"]}
 
 
-def gate(root: Path, state: Path) -> dict:
-    meta, body = load_state(state)
-    plan = verification_plan(meta)
-    repository = repository_status(root, plan)
-    evidence = evidence_status(root, state, meta, body, plan)
+def combine_gate_result(evidence: dict, repository: dict | None) -> dict:
     result = {**evidence, "verification_ready": evidence["ready"]}
     if repository is not None:
         result.update(ready=evidence["ready"] and repository["ready"],
                       reasons=evidence["reasons"] + repository["reasons"],
                       repository=repository["repository"])
     return result
+
+
+def gate(root: Path, state: Path) -> dict:
+    meta, body = load_state(state)
+    plan = verification_plan(meta)
+    repository = repository_status(root, plan)
+    return combine_gate_result(evidence_status(root, state, meta, body, plan), repository)
 
 
 def execute_check(argv: list[str], root: Path, log: Path, timeout: float) -> tuple[int, bool]:
@@ -417,21 +424,24 @@ def execute_check(argv: list[str], root: Path, log: Path, timeout: float) -> tup
 
 
 def verify(root: Path, state: Path, *, reuse: bool = False) -> dict:
-    if reuse:
-        existing = gate(root, state)
-        if existing["verification_ready"]:
-            return {**existing, "reused": True}
     meta, body = load_state(state)
     plan = verification_plan(meta)
-    if not reuse:
+    repository = None
+    if reuse:
+        repository = repository_status(root, plan)
+    else:
         repository_preflight(root, plan)
     if not plan.get("checks"):
         raise WorkflowError("没有自动检查；不要为通过门槛编造测试。记录实际手工验收即可。")
+    lock = safe_path(root, ".project-workflow/verify.lock", no_symlinks=True)
+    previous = read_evidence(root) if reuse and not lock.exists() else None
     before = snapshot(root, plan["inputs"], state, plan.get("exclude"))
+    if previous:
+        existing = compare_evidence(root, meta, body, plan, previous, before)
+        if existing["ready"] and not lock.exists():
+            return {**combine_gate_result(existing, repository), "reused": True}
     before_identity = identity(root)
-    storage = safe_path(root, ".project-workflow", no_symlinks=True)
-    storage.mkdir(exist_ok=True)
-    lock = storage / "verify.lock"
+    lock.parent.mkdir(exist_ok=True)
     try:
         lock.mkdir()
     except FileExistsError as error:

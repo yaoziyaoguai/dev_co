@@ -126,7 +126,7 @@ python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host claude --root "$PROJECT_R
 
 行为：
 
-- **SessionStart**：发现接入的当前记录时注入简短上下文。仍需读取本技能和本轮相关代码；没有接入的项目不创建文件。
+- **SessionStart**：按宿主实际发送的 `startup`、`resume`、`clear`、`compact` 或 `fork` 事件恢复记录。自动注入的整段摘要超过 8,000 个 UTF-8 字节时，只返回记录路径和补读提示，可用 `brief` 查看完整摘要。接手时核对本技能和本轮相关代码。
 - **Stop（可选）**：默认不生成，也不读取状态或扫描输入。明确选择每回合结束提醒时，加 `--check-on-stop` 生成对应配置；explore/shape/recover 或 needs-user/blocked/paused 跳过，其余只提醒证据缺口，不执行测试、不强制续跑。项目仍处于 build 不能证明当前回合是实施请求。旧配置若指向本次更新脚本，原来的无参数 Stop 也不再驱动续跑；需要提醒时重新审阅、生成并按宿主要求加载。
 - **可选 PreToolUse**：仅为明确选定的精确工具名，用重复的 `--protect-tool TOOL_NAME` 生成 matcher。未接入记录、读取失败或证据不满足时返回 deny。保护脚本自身遇到无法处理的异常时以退出码 2 报告。核对通过时返回空对象，让宿主继续正常权限流程。请限定工具名，以免拦截修复和验证本身。
 

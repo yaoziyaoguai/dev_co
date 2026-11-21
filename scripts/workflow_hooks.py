@@ -12,6 +12,8 @@ import sys
 import project_workflow as workflow
 from workflow_files import configure_cli_output
 
+SESSION_CONTEXT_MAX_BYTES = 8000
+
 
 def configured_root(root: Path) -> Path:
     resolved = root.resolve()
@@ -28,7 +30,7 @@ def config(host: str, state: str | None, protect_tools: list[str], root: Path | 
     if state:
         base.extend(["--state", state])
     command = shlex.join(base)
-    matcher = "startup|resume|compact" if host == "codex" else "startup|resume|clear|compact|fork"
+    matcher = "startup|resume|clear|compact|fork"
     hooks = {
         "SessionStart": [{"matcher": matcher, "hooks": [
             {"type": "command", "command": command, "timeout": 10}]}],
@@ -64,10 +66,13 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
             if protect or state_name:
                 raise workflow.WorkflowError("未找到指定或已接入的项目状态记录。")
             return {}
-        meta, _ = workflow.load_state(state)
         if event == "SessionStart":
+            context = workflow.brief(root, state)
+            if len(context.encode("utf-8", errors="backslashreplace")) > SESSION_CONTEXT_MAX_BYTES:
+                context = (f"状态记录：{state}\n"
+                           "自动恢复摘要超过长度预算。请读取该记录或运行 brief，核对目标、约束、验收和下一步。")
             return {"hookSpecificOutput": {"hookEventName": "SessionStart",
-                    "additionalContext": workflow.brief(root, state)}}
+                    "additionalContext": context}}
         if event == "PreToolUse" and protect:
             outcome = workflow.gate(root, state)
             if not outcome["ready"]:
@@ -76,6 +81,7 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
                         "permissionDecisionReason": "项目就绪检查未通过：" + "；".join(outcome["reasons"])}}
             # 就绪检查通过只是不拦截，不能替代宿主权限或用户授权。
             return {}
+        meta, _ = workflow.load_state(state)
         if event != "Stop" or meta["phase"] in {"explore", "shape", "recover"}:
             return {}
         if meta["status"] in {"needs-user", "blocked", "paused"}:

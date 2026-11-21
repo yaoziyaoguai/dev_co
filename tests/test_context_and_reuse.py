@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -85,7 +86,9 @@ class ReuseTests(ProjectFixture):
         first = workflow.verify(self.root, self.state, reuse=True)
         evidence = workflow.read_evidence(self.root)
         self.assertFalse(first["reused"])
-        second = workflow.verify(self.root, self.state, reuse=True)
+        with patch.object(workflow, "snapshot", wraps=workflow.snapshot) as snapshots:
+            second = workflow.verify(self.root, self.state, reuse=True)
+        self.assertEqual(snapshots.call_count, 1)
         self.assertTrue(second["reused"])
         self.assertEqual(self.counter.read_text(), "1")
         self.assertEqual(workflow.read_evidence(self.root), evidence)
@@ -113,9 +116,28 @@ class ReuseTests(ProjectFixture):
     def test_changed_inputs_do_not_reuse_previous_success(self):
         workflow.verify(self.root, self.state, reuse=True)
         (self.root / "src/logic.py").write_text("value = 2\n")
-        result = workflow.verify(self.root, self.state, reuse=True)
+        with patch.object(workflow, "snapshot", wraps=workflow.snapshot) as snapshots:
+            result = workflow.verify(self.root, self.state, reuse=True)
         self.assertFalse(result["reused"])
         self.assertFalse(result["ready"])
+        self.assertEqual(snapshots.call_count, 3)
+
+    def test_rerun_checks_current_inputs_after_publishing_new_evidence(self):
+        workflow.verify(self.root, self.state, reuse=True)
+        self.meta["goal_revision"] += 1
+        self.save()
+        original_write = workflow.write_json
+
+        def write_and_edit(path, report):
+            original_write(path, report)
+            if path.name == "latest.json" and report["status"] == "complete":
+                (self.root / "src/logic.py").write_text("value = 2\n")
+
+        with patch.object(workflow, "write_json", side_effect=write_and_edit):
+            result = workflow.verify(self.root, self.state, reuse=True)
+        self.assertFalse(result["reused"])
+        self.assertFalse(result["ready"])
+        self.assertIn("证据已过期或不匹配：input_hash", result["reasons"])
 
 
 class RepositoryGateTests(ProjectFixture):

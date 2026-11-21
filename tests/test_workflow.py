@@ -595,6 +595,24 @@ class HookTests(ProjectFixture):
         self.assertIn("验证局部行为", result["hookSpecificOutput"]["additionalContext"])
         self.assertFalse((self.root / ".project-workflow").exists())
 
+    def test_session_start_matches_all_supported_sources(self):
+        for host in ("codex", "claude"):
+            matcher = hooks.config(host, None, [])["hooks"]["SessionStart"][0]["matcher"]
+            for source in ("startup", "resume", "clear", "compact", "fork"):
+                with self.subTest(host=host, source=source):
+                    self.assertIsNotNone(re.fullmatch(matcher, source))
+
+    def test_session_start_points_to_state_when_full_context_exceeds_budget(self):
+        self.body += "历史记录。" * 1000
+        self.save()
+        self.assertGreater(len(workflow.brief(self.root, self.state).encode("utf-8")), 8000)
+        result = hooks.respond(self.event("SessionStart"))
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(context.encode("utf-8")), 8000)
+        self.assertIn(str(self.state), context)
+        self.assertIn("读取该记录", context)
+        self.assertNotIn("历史记录。", context)
+
     def test_stop_defaults_to_no_work_even_when_project_is_building(self):
         with patch.object(workflow, "gate") as gate, patch.object(workflow, "load_state") as load:
             self.assertEqual(hooks.respond(self.event("Stop")), {})
