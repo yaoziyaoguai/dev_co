@@ -6,7 +6,7 @@
 
 修改触发范围时选跑 `standalone_evaluation`、`sustained_development`；修改记忆规则时选跑 `goal_change`、`handoff`；修改流程或验证要求时选跑 `read_only_discussion`、`settled_local_app`、`scoped_fix`。一次结果只能说明该宿主、模型和技能版本在这个场景中的表现。
 
-修改界面指南时选跑 `ui_read_only_discussion`、`ui_filtered_empty`，分别检查只读设计判断和真实状态恢复；涉及加载边界时再选 `sustained_development`、`scoped_fix`。界面场景需区分源码建议、实际视觉和交互证据，缺少浏览器不能记为实际交互通过。
+修改界面指南时选跑 `ui_read_only_discussion`、`ui_filtered_empty`，分别检查只读设计判断和真实状态恢复。涉及加载边界时再选 `sustained_development`、`scoped_fix`。验证 Web 专项入口时，用可用和未提供该专项技能的目录分别运行 `ui_filtered_empty`。界面场景需区分源码建议、视觉和实际交互证据。
 
 修改按项目取舍的指导时，选跑 `project_subject_surfaces` 与 `project_mature_cli`：前者检查同一产品的不同角色和界面是否有具体依据，后者检查已有非界面产品的兼容增量。判定依据是实际方案、动作与输出，不能只看是否复述“用户、对象、阶段”等词。
 
@@ -20,11 +20,19 @@
 
 ## 怎样运行
 
-1. 使用临时目录或一次性副本，每个场景单独初始化。把 `initial_files` 写成对应的相对路径；可做一次本地 Git 基线，便于查看差异。不要挂载真实项目、凭据或私人会话。
+1. 在空临时目录使用 `prepare` 初始化场景。只读场景结束后用 `verify-clean` 重新比较初始文件和运行目录。
 2. 给被测 agent 正常的技能目录与宿主入口配置。测路由时不要强制加载 `dev_co`，也不要告诉它预期触发结果；显式调用测试应单独记录。记录所用全局入口规则，因为入口和技能共同决定行为。
 3. 开一个没有本轮评审历史的会话，仅发送 `user_request`，并告知工作目录。不要发送场景名称、`review` 字段或本文件。agent 可使用正常的文件、终端和必要的本地浏览器工具；不授予推送、发布或付费权限。
 4. 保存工具动作、最终答复和文件差异；由评审者读取 `review`，检查实际产物和运行结果。需要浏览器交互的场景应提供浏览器；缺少工具导致的未验证记为 `inconclusive`，不能以静态检查冒充通过。
 5. 对每条标准记 `pass`、`fail` 或 `inconclusive`，附一条可核查证据。不要用是否出现某个词、标题、固定文档名或“已使用技能”的自述代替行为判定。路由可结合技能读取记录、实际启动的流程和产生的文件判断。
+
+从源码目录运行，`$DEVCO_EVAL_DIR` 指本次准备的空临时目录。
+
+```sh
+python3 scripts/eval_scenarios.py list
+python3 scripts/eval_scenarios.py prepare --scenario standalone_evaluation --dest "$DEVCO_EVAL_DIR"
+python3 scripts/eval_scenarios.py verify-clean --scenario standalone_evaluation --dest "$DEVCO_EVAL_DIR"
+```
 
 评审者可以补跑相关检查，但应与被测 agent 自己执行的检查分别记录。既要看该做的工作是否完成，也要看是否发生越界写入、无理由扩大测试、额外审批或发布。需求存在合理多解，不要求代码、文档措辞或工具顺序相同。
 

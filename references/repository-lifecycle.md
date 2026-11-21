@@ -84,14 +84,16 @@ python3 "$SKILL_ROOT/scripts/repository_check.py" checkpoint --root "$PROJECT_RO
 
 同分支普通提交可以继续，但基线提交必须仍是当前 HEAD 的祖先。分支切换、改写/回退导致来源不再延续、Git 与非 Git 状态改变或 scope 不符均报错。空 Git 仓库到同分支首个提交可以继续。规则改变后仍以旧快照核对，`policy_changed` 只报告变化，不自动接纳现状或重建基线。
 
-不同工作线优先使用已有独立 checkout/worktree。确需同根换 scope 时，按以下顺序退出再接入：
+不同工作线优先使用已有独立 checkout/worktree。确需同根换 scope 时，先完成原工作线的功能或人工验收，再在下一轮修改前运行。
 
-1. 按原任务既定方式完成功能或人工验收，再用原 scope 执行 `checkpoint`，确认成功。
-2. 建立一个尚不存在的归档目录，例如 `.project-workflow/archive/quote-v1/`；将 `repository-baseline.json` 和存在的 `repository-reviews.json` 从 `.project-workflow/` 移入该目录，保留记录且让活动文件位置空出。不覆盖已有归档，不删除产品文件。
-3. 更新原当前记录中的 scope；使用通用计划时同步 `verification.repository_scope`。
-4. 在新增量修改前，以新 scope 执行 `adopt`。归档只供追溯，不自动恢复为当前通过依据。
+```sh
+python3 "$SKILL_ROOT/scripts/repository_check.py" switch-scope --root "$PROJECT_ROOT" \
+  --scope quote-v1 --next-scope quote-v2
+```
 
-schema 1 没有来源信息，脚本明确拒绝静默升级。保留旧文件，结合原任务/Git 证据人工核对当前增量；在下一明确起点按上面的归档退出步骤接入 schema 2。人工验收项目不必为此编造自动检查。
+命令先核对原 scope。就绪后归档旧基线和核对记录，再接入新基线。到原当前记录更新 scope，使用通用计划时同步 `verification.repository_scope`。归档供追溯。每次推进基线后，后续文档待补项需重新核对，旧理由仍可查阅。
+
+schema 1 缺少来源信息，需先结合原任务和 Git 核实当前增量。保留旧文件，在下一明确起点归档旧基线后用 `adopt` 接入 schema 2。人工验收项目沿用实际验收方式。
 
 ## 接到完成出口，避免重复工作
 

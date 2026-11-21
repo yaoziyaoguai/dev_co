@@ -14,6 +14,7 @@ def main() -> int:
     parser.add_argument("--host", choices=("codex", "claude", "all"), default="all")
     parser.add_argument("--codex-home", type=Path, help="Codex 配置目录，默认使用 CODEX_HOME 或 ~/.codex。")
     parser.add_argument("--claude-home", type=Path, help="Claude Code 配置目录，默认使用 CLAUDE_CONFIG_DIR 或 ~/.claude。")
+    parser.add_argument("--check", action="store_true", help="仅核对选定宿主的链接是否指向当前源码。")
     args = parser.parse_args()
 
     source = Path(__file__).resolve().parents[1]
@@ -26,12 +27,23 @@ def main() -> int:
     try:
         targets = dict.fromkeys(home.expanduser().resolve() / "skills" / "dev_co"
                                 for host, home in homes.items() if args.host in (host, "all"))
-        existing = [str(target) for target in targets if target.exists() or target.is_symlink()]
-        if existing:
-            parser.exit(1, "请先检查并备份已有安装。\n" + "\n".join(existing) + "\n")
+        linked, missing, conflicts = [], [], []
         for target in targets:
+            if target.is_symlink() and target.resolve() == source:
+                linked.append(target)
+            elif target.exists() or target.is_symlink():
+                conflicts.append(target)
+            else:
+                missing.append(target)
+        if conflicts:
+            parser.exit(1, "请先检查并备份其他安装。\n" + "\n".join(map(str, conflicts)) + "\n")
+        if args.check and missing:
+            parser.exit(1, "以下宿主尚未链接。\n" + "\n".join(map(str, missing)) + "\n")
+        for target in linked:
+            print(f"已链接 {target} → {source}")
+        for target in missing:
             target.parent.mkdir(parents=True, exist_ok=True)
-        for target in targets:
+        for target in missing:
             target.symlink_to(source, target_is_directory=True)
             print(f"{target} → {source}")
     except (OSError, RuntimeError) as error:

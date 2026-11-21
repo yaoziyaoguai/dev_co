@@ -29,12 +29,12 @@ class ProjectFixture(unittest.TestCase):
         self.root = self.base / "project with spaces"
         self.root.mkdir()
         (self.root / "src").mkdir()
-        (self.root / "src/logic.py").write_text("value = 1\n")
+        (self.root / "src/logic.py").write_text("value = 1\n", encoding="utf-8")
         (self.root / "check.py").write_text(
             "from pathlib import Path\n"
             "assert Path('src/logic.py').read_text() == 'value = 1\\n'\n"
             "print('behavior passed')\n"
-        )
+        , encoding="utf-8")
         self.state = workflow.initialize(self.root, "docs/CURRENT.md", "验证局部行为")
         self.meta, self.body = workflow.load_state(self.state)
         self.meta["phase"] = "repair"
@@ -48,7 +48,7 @@ class ProjectFixture(unittest.TestCase):
 
     def save(self):
         self.state.write_text("---\n" + json.dumps(self.meta, ensure_ascii=False, indent=2)
-                              + "\n---\n" + self.body)
+                              + "\n---\n" + self.body, encoding="utf-8")
 
     def verify(self):
         return workflow.verify(self.root, self.state)
@@ -62,10 +62,26 @@ class ProjectFixture(unittest.TestCase):
     def cli(self, command, **kwargs):
         return subprocess.run([sys.executable, str(SCRIPTS / "project_workflow.py"),
                                command, "--root", str(self.root)],
-                              capture_output=True, text=True, timeout=10, **kwargs)
+                              capture_output=True, encoding="utf-8", timeout=10, **kwargs)
 
 
 class EvidenceTests(ProjectFixture):
+    def test_adopt_state_preserves_original_markdown_bytes_and_permissions(self):
+        path = self.root / "docs/NOTES.md"
+        original = "# 原始记录\r\n保留换行。\r\n".encode("utf-8")
+        path.write_bytes(original)
+        path.chmod(0o600)
+        args = [sys.executable, str(SCRIPTS / "project_workflow.py"), "adopt-state", "--root", str(self.root),
+                "--state", "docs/NOTES.md", "--phase", "build"]
+        result = subprocess.run(args, capture_output=True, encoding="utf-8", timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        first = path.read_bytes()
+        self.assertTrue(first.endswith(original))
+        self.assertEqual(workflow.load_state(path)[0]["phase"], "build")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(subprocess.run(args, capture_output=True, timeout=10).returncode, 0)
+        self.assertEqual(path.read_bytes(), first)
+
     def test_init_preserves_existing_work(self):
         before = self.state.read_bytes()
         with self.assertRaises(workflow.WorkflowError):
@@ -81,7 +97,7 @@ class EvidenceTests(ProjectFixture):
         self.state.unlink()
         custom = workflow.initialize(self.root, "notes/active.md", "custom goal")
         self.assertEqual(workflow.locate_state(self.root, "notes/active.md"), custom)
-        self.state.write_text("# User's existing document\nDo not rewrite.\n")
+        self.state.write_text("# User's existing document\nDo not rewrite.\n", encoding="utf-8")
         self.assertIsNone(workflow.locate_state(self.root))
 
     def test_auto_detection_skips_ordinary_candidates_before_enabled_state(self):
@@ -90,6 +106,7 @@ class EvidenceTests(ProjectFixture):
         active.write_bytes(original)
         for ordinary in ("---\ntitle: dev_co notes\n---\n" + "x" * 150_000,
                          '---\n{"title":"dev_co notes","settings":{"workflow":"dev_co"}}\n---\n',
+                         '---\n{"settings":{"workflow":"dev_co"}, // JSONC example\n}\n---\n',
                          "# Ordinary project notes\n" + "x" * 150_000):
             with self.subTest(prefix=ordinary[:36]):
                 self.state.write_text(ordinary, encoding="utf-8")
@@ -125,12 +142,12 @@ class EvidenceTests(ProjectFixture):
         report = workflow.read_evidence(self.root)
         self.assertEqual(report["checks"][0]["returncode"], 0)
         log = self.root / report["checks"][0]["log"]
-        self.assertIn("behavior passed", log.read_text())
+        self.assertIn("behavior passed", log.read_text(encoding="utf-8"))
         self.assertEqual(set(report["coverage"]), {"src/logic.py", "check.py"})
 
     def test_failure_replaces_previous_success(self):
         self.assertTrue(self.verify()["ready"])
-        (self.root / "check.py").write_text("raise SystemExit(3)\n")
+        (self.root / "check.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
         self.assertFalse(self.verify()["ready"])
         self.assertEqual(workflow.read_evidence(self.root)["checks"][0]["returncode"], 3)
         self.assertFalse(self.gate()["ready"])
@@ -147,7 +164,7 @@ class EvidenceTests(ProjectFixture):
             "import subprocess,sys,time\n"
             + "subprocess.Popen([sys.executable, '-c', " + repr(child) + "])\n"
             + "time.sleep(5)\n"
-        )
+        , encoding="utf-8")
         self.meta["verification"]["checks"][0]["timeout_seconds"] = 0.25
         self.save()
         self.assertFalse(self.verify()["ready"])
@@ -157,13 +174,13 @@ class EvidenceTests(ProjectFixture):
 
     def test_uncommitted_edit_invalidates_evidence(self):
         self.verify()
-        (self.root / "src/logic.py").write_text("value = 2\n")
+        (self.root / "src/logic.py").write_text("value = 2\n", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
 
     def test_new_and_removed_files_in_declared_directory(self):
         self.verify()
         added = self.root / "src/new.py"
-        added.write_text("extra = True\n")
+        added.write_text("extra = True\n", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
         self.verify()
         added.unlink()
@@ -171,7 +188,7 @@ class EvidenceTests(ProjectFixture):
 
     def test_unrelated_edits_and_operational_notes_preserve_evidence(self):
         self.verify()
-        (self.root / "notes.md").write_text("unrelated note")
+        (self.root / "notes.md").write_text("unrelated note", encoding="utf-8")
         self.body += "\n## 最近验证\n已通过，见证据。\n## 下一步\n交接。\n"
         self.save()
         self.assertTrue(self.gate()["ready"])
@@ -304,7 +321,7 @@ class EvidenceTests(ProjectFixture):
         subprocess.run(["git", "-C", str(self.root), "switch", "-qc", "codex/other"], check=True)
         self.assertTrue(self.gate()["ready"])
         self.assertEqual(workflow.read_evidence(self.root), original)
-        (self.root / "src/logic.py").write_text("value = 2\n")
+        (self.root / "src/logic.py").write_text("value = 2\n", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
 
     def test_git_dependent_checks_stay_strict(self):
@@ -356,12 +373,16 @@ class EvidenceTests(ProjectFixture):
         self.assertFalse(self.gate()["ready"])
 
     def test_input_mutation_during_execution_is_not_success(self):
-        (self.root / "check.py").write_text("from pathlib import Path\nPath('src/logic.py').write_text('value = 2\\n')\n")
+        (self.root / "check.py").write_text("from pathlib import Path\nPath('src/logic.py').write_text('value = 2\\n')\n", encoding="utf-8")
         self.assertFalse(self.verify()["ready"])
         self.assertTrue(workflow.read_evidence(self.root)["inputs_changed"])
 
     def test_goal_mutation_during_execution_is_not_success(self):
-        (self.root / "check.py").write_text("from pathlib import Path\np=Path('docs/CURRENT.md')\np.write_text(p.read_text() + '\\n## New decision\\nChanged requirement\\n')\n")
+        (self.root / "check.py").write_text(
+            "from pathlib import Path\np=Path('docs/CURRENT.md')\n"
+            "p.write_text(p.read_text(encoding='utf-8') + '\\n## New decision\\nChanged requirement\\n', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
         self.assertFalse(self.verify()["ready"])
         self.assertTrue(workflow.read_evidence(self.root)["inputs_changed"])
 
@@ -369,24 +390,24 @@ class EvidenceTests(ProjectFixture):
         (self.root / "check.py").write_text(
             "from pathlib import Path\n"
             "if Path('delete.flag').exists(): Path('check.py').unlink()\n"
-        )
-        source = (self.root / "check.py").read_text()
+        , encoding="utf-8")
+        source = (self.root / "check.py").read_text(encoding="utf-8")
         self.assertTrue(self.verify()["ready"])
         old = workflow.read_evidence(self.root)["run_id"]
-        (self.root / "delete.flag").write_text("1")
+        (self.root / "delete.flag").write_text("1", encoding="utf-8")
         with self.assertRaises(workflow.WorkflowError):
             self.verify()
-        (self.root / "check.py").write_text(source)
+        (self.root / "check.py").write_text(source, encoding="utf-8")
         report = workflow.read_evidence(self.root)
         self.assertNotEqual(report["run_id"], old)
         self.assertNotEqual(report["status"], "complete")
         self.assertFalse(self.gate()["ready"])
 
     def test_concurrent_run_is_rejected(self):
-        (self.root / "check.py").write_text("from pathlib import Path\nimport time\nPath('started').write_text('1')\ntime.sleep(1)\n")
+        (self.root / "check.py").write_text("from pathlib import Path\nimport time\nPath('started').write_text('1')\ntime.sleep(1)\n", encoding="utf-8")
         process = subprocess.Popen([sys.executable, str(SCRIPTS / "project_workflow.py"),
                                     "verify", "--root", str(self.root)],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
         try:
             deadline = time.monotonic() + 5
             while not (self.root / "started").exists() and time.monotonic() < deadline:
@@ -404,10 +425,10 @@ class EvidenceTests(ProjectFixture):
                 process.communicate()
 
     def test_termination_cleans_up_running_checks(self):
-        (self.root / "check.py").write_text("from pathlib import Path\nimport time\nPath('started').write_text('1')\ntime.sleep(0.9)\nPath('leaked.txt').write_text('alive')\n")
+        (self.root / "check.py").write_text("from pathlib import Path\nimport time\nPath('started').write_text('1')\ntime.sleep(0.9)\nPath('leaked.txt').write_text('alive')\n", encoding="utf-8")
         process = subprocess.Popen([sys.executable, str(SCRIPTS / "project_workflow.py"),
                                     "verify", "--root", str(self.root)],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
         try:
             deadline = time.monotonic() + 5
             while not (self.root / "started").exists() and time.monotonic() < deadline:
@@ -433,12 +454,12 @@ class EvidenceTests(ProjectFixture):
             self.verify()
 
     def test_malformed_state_and_plan_are_reported(self):
-        good = self.state.read_text()
+        good = self.state.read_text(encoding="utf-8")
         for content in ("---\n{}\n---\n", "---\nnot json\n---\n", "plain document", "---\n[]\n---\n"):
-            self.state.write_text(content)
+            self.state.write_text(content, encoding="utf-8")
             with self.subTest(content=content), self.assertRaises(workflow.WorkflowError):
                 workflow.load_state(self.state)
-        self.state.write_text(good)
+        self.state.write_text(good, encoding="utf-8")
         for field, value in (("phase", []), ("status", {}), ("goal_revision", True), ("environment", None)):
             old = self.meta[field]
             self.meta[field] = value
@@ -465,16 +486,16 @@ class EvidenceTests(ProjectFixture):
 
     def test_unsafe_paths_and_symlinks_are_rejected(self):
         outside = self.base / "private.txt"
-        outside.write_text("synthetic sentinel")
+        outside.write_text("synthetic sentinel", encoding="utf-8")
         (self.root / "link.txt").symlink_to(outside)
         for name in ("../private.txt", str(outside), "link.txt"):
             with self.subTest(name=name), self.assertRaises(workflow.WorkflowError):
                 workflow.snapshot(self.root, [name], self.state)
 
     def test_sensitive_names_and_recursive_symlinks_not_read(self):
-        (self.root / ".env").write_text("synthetic sentinel")
+        (self.root / ".env").write_text("synthetic sentinel", encoding="utf-8")
         (self.root / ".aws").mkdir()
-        (self.root / ".aws/credentials").write_text("synthetic sentinel")
+        (self.root / ".aws/credentials").write_text("synthetic sentinel", encoding="utf-8")
         (self.root / "src/internal-link.py").symlink_to(self.root / "check.py")
         with patch.object(workflow, "file_hash", wraps=workflow.file_hash) as hashing:
             snapshot = workflow.snapshot(self.root, ["."], self.state)
@@ -488,7 +509,7 @@ class EvidenceTests(ProjectFixture):
     def test_evidence_cannot_redirect_log_reads(self):
         self.verify()
         private = self.root / ".env"
-        private.write_text("synthetic sentinel")
+        private.write_text("synthetic sentinel", encoding="utf-8")
         for log in (".env", "../private.txt", ["bad type"]):
             report = workflow.read_evidence(self.root)
             report["checks"][0]["log"] = log
@@ -509,7 +530,7 @@ class EvidenceTests(ProjectFixture):
         self.verify()
         report = workflow.read_evidence(self.root)
         log = self.root / report["checks"][0]["log"]
-        log.write_text("edited")
+        log.write_text("edited", encoding="utf-8")
         self.assertFalse(self.gate()["ready"])
         log.unlink()
         self.assertFalse(self.gate()["ready"])
@@ -523,7 +544,7 @@ class EvidenceTests(ProjectFixture):
             workflow.write_json(workflow.evidence_path(self.root), report)
             with self.subTest(change=change):
                 self.assertFalse(self.gate()["ready"])
-        workflow.evidence_path(self.root).write_text("[broken")
+        workflow.evidence_path(self.root).write_text("[broken", encoding="utf-8")
         with self.assertRaises(workflow.WorkflowError):
             self.gate()
 
@@ -534,7 +555,7 @@ class EvidenceTests(ProjectFixture):
         self.assertTrue(self.verify()["ready"])
         self.assertFalse((self.root / "injected").exists())
         report = workflow.read_evidence(self.root)
-        self.assertIn(literal, (self.root / report["checks"][0]["log"]).read_text())
+        self.assertIn(literal, (self.root / report["checks"][0]["log"]).read_text(encoding="utf-8"))
 
     def test_input_and_state_size_limits(self):
         with (self.root / "src/large").open("wb") as target:
@@ -551,16 +572,78 @@ class EvidenceTests(ProjectFixture):
         self.assertEqual(self.cli("gate").returncode, 1)
         self.assertEqual(self.cli("verify").returncode, 0)
         self.assertEqual(self.cli("gate").returncode, 0)
-        self.state.write_text("broken")
+        self.state.write_text("broken", encoding="utf-8")
         self.assertEqual(self.cli("gate").returncode, 2)
 
-    def test_commands_keep_utf8_state_and_output_in_ascii_locale(self):
-        subprocess.run(["git", "init", "-q", "-b", "工作线", str(self.root)], check=True)
-        self.meta["verification"]["checks"][0]["id"] = "局部验证"
+    def test_redirected_standard_streams_keep_their_text_encoding(self):
+        with (patch.object(sys, "stdin", io.StringIO()), patch.object(sys, "stdout", io.StringIO()),
+              patch.object(sys, "stderr", io.StringIO())):
+            workflow.configure_cli_output(include_stdin=True)
+
+    def test_non_utf8_record_fails_before_writing_an_evidence_file(self):
+        data = {"path": "bad\udcff"}
+        path = self.root / "result.json"
+        with self.assertRaisesRegex(workflow.WorkflowError, "UTF-8"):
+            workflow.digest(data)
+        before = list(self.root.iterdir())
+        with self.assertRaisesRegex(workflow.WorkflowError, "UTF-8"):
+            workflow.write_json(path, data)
+        self.assertEqual(list(self.root.iterdir()), before)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux 文件系统允许非 UTF-8 文件名")
+    def test_verify_rejects_an_invalid_utf8_filename_without_publishing_evidence(self):
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        scratch = self.root / "src/scratch"
+        scratch.mkdir()
+        with open(os.fsencode(scratch) + b"/bad\xff.py", "wb") as stream:
+            stream.write(b"pass\n")
+        result = self.cli("verify")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("须使用有效的 UTF-8", json.loads(result.stderr)["error"])
+        self.assertFalse(workflow.evidence_path(self.root).exists())
+        self.meta["verification"]["exclude"] = ["src/scratch/"]
         self.save()
-        (self.root / repository.POLICY).write_text(json.dumps({"schema": 1, "paths": {"src/": "实现"}}),
+        self.assertTrue(self.verify()["ready"])
+
+    def test_verify_lock_reports_a_missing_owner_pid(self):
+        lock = self.root / ".project-workflow/verify.lock"
+        lock.mkdir(parents=True)
+        run_id = "20261122T000000Z-01234567"
+        workflow.write_json(lock / "owner.json", {"pid": 42_000, "run_id": run_id})
+        with patch.object(workflow.os, "kill", side_effect=ProcessLookupError) as lookup:
+            self.assertIn(f"{run_id}，PID 42000 已不存在", self.gate()["reasons"][0])
+            with self.assertRaisesRegex(workflow.WorkflowError, "PID 42000 已不存在"):
+                self.verify()
+        lookup.assert_called_with(42_000, 0)
+        self.assertTrue(lock.is_dir())
+
+    def test_explicit_log_retention_keeps_current_and_unfinished_runs(self):
+        self.assertTrue(self.verify()["ready"])
+        evidence = workflow.evidence_path(self.root).parent
+        unfinished = evidence / "20250101T000000Z-00000000"
+        unfinished.mkdir()
+        (unfinished / "1.log").write_text("unfinished", encoding="utf-8")
+        self.assertTrue(workflow.verify(self.root, self.state, keep_runs=1)["ready"])
+        current = evidence / workflow.read_evidence(self.root)["run_id"]
+        self.assertEqual({p for p in evidence.iterdir() if p.is_dir()}, {current, unfinished})
+        self.assertTrue(self.gate()["ready"])
+
+    def test_commands_keep_utf8_state_and_output_in_ascii_locale(self):
+        relative_state = self.state.relative_to(self.root)
+        self.root = self.root.rename(self.base / os.fsdecode("中文项目".encode("utf-8")))
+        self.state = self.root / relative_state
+        subprocess.run(["git", "init", "-q", "-b", "工作线".encode("utf-8"), str(self.root)], check=True)
+        source = self.root / os.fsdecode("实现/入口.py".encode("utf-8"))
+        source.parent.mkdir()
+        source.write_text("pass\n", encoding="utf-8")
+        self.meta["verification"]["inputs"].append("实现")
+        self.meta["verification"]["checks"][0]["id"] = "局部验证"
+        self.meta["verification"]["checks"][0]["argv"].append("检查")
+        self.save()
+        (self.root / repository.POLICY).write_text(json.dumps({"schema": 1, "paths": {"实现/": "实现"}}),
                                                   encoding="utf-8")
-        locale_env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONIOENCODING": ""}
+        locale_env = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0",
+                      "PYTHONIOENCODING": ""}
 
         def run(script, *argv, payload=None):
             result = subprocess.run([sys.executable, str(SCRIPTS / script), *argv], cwd=self.root,
@@ -569,15 +652,20 @@ class EvidenceTests(ProjectFixture):
             self.assertEqual(result.returncode, 0, result.stderr)
             return result.stdout
 
-        run("project_workflow.py", "init", "--state", "docs/OTHER.md")
-        self.assertIn("本轮目标", (self.root / "docs/OTHER.md").read_text(encoding="utf-8"))
+        custom = "docs/交接.md".encode("utf-8")
+        goal = "记录新目标".encode("utf-8")
+        run("project_workflow.py", "init", "--state", custom, "--goal", goal)
+        self.assertIn(goal.decode("utf-8"), run("project_workflow.py", "brief", "--state", custom))
         self.assertIn("验证局部行为", run("project_workflow.py", "brief"))
-        self.assertTrue(json.loads(run("project_workflow.py", "verify"))["ready"])
+        result = json.loads(run("project_workflow.py", "verify"))
+        self.assertTrue(result["ready"])
+        self.assertIn("实现/入口.py", result["coverage"])
         self.assertEqual(workflow.read_evidence(self.root)["checks"][0]["id"], "局部验证")
         self.assertTrue(json.loads(run("project_workflow.py", "gate"))["ready"])
-        run("repository_check.py", "adopt", "--scope", "work")
-        self.assertIn("工作线", run("repository_check.py", "check", "--scope", "work"))
-        event = json.dumps(self.event("SessionStart"), ensure_ascii=False)
+        scope = "工作线".encode("utf-8")
+        run("repository_check.py", "adopt", "--scope", scope)
+        self.assertIn("工作线", run("repository_check.py", "check", "--scope", scope))
+        event = json.dumps(self.event("SessionStart", cwd=os.fsencode(self.root).decode("utf-8")), ensure_ascii=False)
         response = run("workflow_hooks.py", "--host", "codex", payload=event)
         self.assertIn("验证局部行为", json.loads(response)["hookSpecificOutput"]["additionalContext"])
 
@@ -602,16 +690,31 @@ class HookTests(ProjectFixture):
                 with self.subTest(host=host, source=source):
                     self.assertIsNotNone(re.fullmatch(matcher, source))
 
-    def test_session_start_points_to_state_when_full_context_exceeds_budget(self):
-        self.body += "历史记录。" * 1000
+    def test_session_start_compacts_long_chinese_context(self):
+        self.body += "\n## 历史\n" + "历史记录。" * 1000
         self.save()
-        self.assertGreater(len(workflow.brief(self.root, self.state).encode("utf-8")), 8000)
+        self.assertGreater(len(workflow.brief(self.root, self.state).encode("utf-8")), 6000)
         result = hooks.respond(self.event("SessionStart"))
         context = result["hookSpecificOutput"]["additionalContext"]
-        self.assertLessEqual(len(context.encode("utf-8")), 8000)
+        self.assertLessEqual(len(context.encode("utf-8")), 6000)
+        self.assertIn(str(self.state), context)
+        self.assertIn("验证局部行为", context)
+        self.assertNotIn("历史记录。", context)
+
+    def test_session_start_points_to_state_if_compact_summary_is_still_oversized(self):
+        self.meta["brief_sections"] = ["长标题" * 1000]
+        self.save()
+        result = hooks.respond(self.event("SessionStart"))
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(context.encode("utf-8")), 6000)
         self.assertIn(str(self.state), context)
         self.assertIn("读取该记录", context)
-        self.assertNotIn("历史记录。", context)
+
+    def test_only_codex_sets_session_context_limit(self):
+        for host in ("codex", "claude"):
+            config = hooks.config(host, None, [])
+            handler = config["hooks"]["SessionStart"][0]["hooks"][0]
+            self.assertEqual(handler.get("additionalContextLimit"), 4000 if host == "codex" else None)
 
     def test_stop_defaults_to_no_work_even_when_project_is_building(self):
         with patch.object(workflow, "gate") as gate, patch.object(workflow, "load_state") as load:
@@ -647,7 +750,7 @@ class HookTests(ProjectFixture):
 
     def test_stale_evidence_blocks_selected_tool(self):
         self.verify()
-        (self.root / "src/logic.py").write_text("value = 2\n")
+        (self.root / "src/logic.py").write_text("value = 2\n", encoding="utf-8")
         result = hooks.respond(self.event("PreToolUse"), protect=True)
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
@@ -666,7 +769,7 @@ class HookTests(ProjectFixture):
         self.assertIn("systemMessage", result)
 
     def test_malformed_record_and_cwd_do_not_claim_success(self):
-        self.state.write_text('---\n{"workflow":"dev_co",}\n---\n')
+        self.state.write_text('---\n{"workflow":"dev_co",}\n---\n', encoding="utf-8")
         self.assertIn("systemMessage", hooks.respond(self.event("Stop"), check_on_stop=True))
         result = hooks.respond(self.event("PreToolUse"), protect=True)
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
@@ -680,7 +783,7 @@ class HookTests(ProjectFixture):
                 self.assertNotIn("PreToolUse", config["hooks"])
                 command = config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
                 result = subprocess.run(shlex.split(command), input=json.dumps(self.event("SessionStart")),
-                                        capture_output=True, text=True, timeout=5)
+                                        capture_output=True, encoding="utf-8", timeout=5)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("验证局部行为", json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"])
 
@@ -694,7 +797,7 @@ class HookTests(ProjectFixture):
 
     def test_invalid_json_protected_cli_returns_blocking_error(self):
         result = subprocess.run([sys.executable, str(SCRIPTS / "workflow_hooks.py"), "--host", "codex", "--protect"],
-                                input="not json", capture_output=True, text=True, timeout=5)
+                                input="not json", capture_output=True, encoding="utf-8", timeout=5)
         self.assertEqual(result.returncode, 2)
 
     def test_unexpected_protected_cli_error_returns_blocking_status(self):
