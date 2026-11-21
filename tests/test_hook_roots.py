@@ -12,6 +12,7 @@ import unittest
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import project_workflow as workflow
+import repository_check as repository
 import workflow_hooks as hooks
 
 
@@ -76,6 +77,37 @@ class HookRootTests(unittest.TestCase):
                 config = hooks.config(host, None, [])
                 command = config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
                 self.assertNotIn("--root", shlex.split(command))
+
+    def test_cli_reports_current_root_when_invoked_below_project(self):
+        nested = self.project / "nested"
+        nested.mkdir()
+        for script, argv in (("project_workflow.py", ["brief"]),
+                             ("repository_check.py", ["check", "--scope", "work"])):
+            with self.subTest(script=script):
+                result = subprocess.run([sys.executable, str(SCRIPTS / script), *argv], cwd=nested,
+                                        capture_output=True, encoding="utf-8", timeout=10)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                error = json.loads(result.stderr)["error"]
+                self.assertIn(str(nested), error)
+                self.assertIn("--root", error)
+
+    def test_cli_defaults_allow_subproject_initialization_and_baseline(self):
+        self.state.unlink()
+        (self.project / repository.POLICY).write_text(json.dumps({"schema": 1, "paths": {"docs/": "状态"}}),
+                                                     encoding="utf-8")
+        for script, argv in (("project_workflow.py", ["init", "--goal", "Local project"]),
+                             ("project_workflow.py", ["brief"]),
+                             ("repository_check.py", ["adopt", "--scope", "work"]),
+                             ("repository_check.py", ["check", "--scope", "work"])):
+            result = subprocess.run([sys.executable, str(SCRIPTS / script), *argv], cwd=self.project,
+                                    capture_output=True, encoding="utf-8", timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            if argv[0] == "brief":
+                self.assertIn("Local project", result.stdout)
+                self.assertNotIn("顶层项目目标", result.stdout)
+        self.assertTrue(self.state.is_file())
+        self.assertTrue((self.project / repository.BASELINE).is_file())
+        self.assertFalse((self.repo / repository.BASELINE).exists())
 
     def test_generated_commands_pin_relative_root_for_both_hosts(self):
         self.assertTrue(workflow.verify(self.project, self.state)["ready"])

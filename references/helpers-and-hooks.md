@@ -51,7 +51,7 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" init --root "$PROJECT_ROOT" --
 
 命令和路径只是示例，使用项目真实可运行的检查；缺少文件即失败。`phase` 为 explore/shape/build/repair/recover/deliver，`status` 为 active/needs-user/blocked/paused/ready/done。`verification.level` 为 none/targeted/integration/release。无自动检查时 checks/inputs 留空并记录实际人工验收，不为凑数编造检查。
 
-自动识别 `docs/CURRENT.md`、`docs/PROJECT.md`、`CURRENT.md` 中带该标记的文件。自定义路径要在项目入口和 Hook 配置中保持一致。所有状态、证据和声明输入必须在项目根目录内；状态/证据路径不能经过符号链接。把生成的 `.project-workflow/` 加入适用的忽略规则前先检查现有约定；原始日志可能含项目信息，不自动提交或上传。
+自动探测按 JSON frontmatter 的 `workflow` 标记识别 `docs/CURRENT.md`、`docs/PROJECT.md`、`CURRENT.md`。普通文档可继续人工维护。自定义路径要在项目入口和 Hook 配置中保持一致。状态与证据文件以 UTF-8 读写。所有状态、证据和声明输入必须在项目根目录内，状态和证据路径不能经过符号链接。把生成的 `.project-workflow/` 加入适用的忽略规则前先检查现有约定。原始日志可能含项目信息，提交或上传须按当前授权处理。
 
 可选字段：`brief_sections` 在 frontmatter 顶层指定现有二级章节的实际标题列表；默认选择本轮目标、验收标准、项目约束、当前决定、代码导航、推进约定、最近验证、下一步。它只决定恢复摘要，不决定意图指纹的排除范围。需要自定义进展标题时使用下述 `non_intent_sections`。
 
@@ -76,7 +76,7 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" verify --reuse --root "$PROJEC
 python3 "$SKILL_ROOT/scripts/project_workflow.py" gate --root "$PROJECT_ROOT"
 ```
 
-`brief` 对短记录沿用全文；长记录按恢复章节提取原文、保留正文位置，明确报告截断、缺项和同名段落歧义，并列出其他章节导航。缺口需要按本轮问题补读，不把摘录当作完整语义总结。新会话/上下文丢失时恢复一次；上下文仍有效就不反复调用。
+`brief` 默认返回无章节歧义的短记录全文。配置 `brief_sections` 后，短记录也按指定章节提取。提取时保留正文位置，报告截断、缺项和恢复章节同名歧义，并列出其他章节导航。按本轮问题补读相应缺口。新会话或上下文丢失时恢复一次即可。
 
 `verify --reuse` 核对功能证据；有效时返回 `reused: true`，不运行测试、不重写日志。证据失效才执行声明的 argv 并记录结果；确有重测需要时省略 `--reuse`。执行前检查配置、输入边界和仓库基线来源，非法时不启动检查；普通资料更新、归属或引用待补不会阻止功能检查。命令不启用 shell 字符串，保留子检查退出码、超时、日志和输入指纹。
 
@@ -114,7 +114,9 @@ python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host claude --root "$PROJECT_R
 
 按需加 `--state docs/PROJECT.md`。输出只是配置片段，**不会安装或启用**。保留宿主原有 hooks，仅合并用户选择的部分，推荐先在单一试用项目启用：
 
-`--root` 与验证 CLI 选择同一个项目根：状态路径、inputs 和证据都相对它解释。生成时将根固化为绝对路径，相对路径按命令进程当前目录解析。子项目必须显式指定自己的根，否则兼容旧配置，按事件 cwd 寻找 Git 顶层。显式根不存在或不是目录时报错；根存在但缺少记录时不回退到父项目。事件 cwd 经解析后必须是固定根本身或其子目录；其他项目的 SessionStart 不注入内容，已选 PreToolUse 保护返回 deny。固定根的配置只用于对应项目，不作为全局通用配置。
+验证和仓库检查 CLI 省略 `--root` 时使用命令进程的当前目录。兼容旧配置，未固定根的 Hook 从事件 cwd 寻找 Git 顶层。对同一项目，尤其是 monorepo 中的子项目，在 CLI 和生成 Hook 配置时都用 `--root` 指定相同目录。状态路径、inputs 和证据都相对该目录解释。生成配置时将根固化为绝对路径，相对路径按命令进程当前目录解析。
+
+显式根不存在或不是目录时报错。显式根存在但缺少记录时，查找范围仍限于该根。事件 cwd 经解析后必须是固定根本身或其子目录。其他项目的 SessionStart 不注入上下文，已选 PreToolUse 保护返回 deny。固定根配置用于对应项目。
 
 启用前先用 `brief` 确认当前记录已经接入且内容正确。只有普通 Markdown、尚无上述 frontmatter 的记录仍能人工接手，但这些适配器不会识别它；应就地接入并保留原文，或明确继续采用原生/人工记录。不能只放入配置就告诉用户“自动记忆已经生效”。
 
@@ -126,7 +128,7 @@ python3 "$SKILL_ROOT/scripts/workflow_hooks.py" --host claude --root "$PROJECT_R
 
 - **SessionStart**：发现接入的当前记录时注入简短上下文。仍需读取本技能和本轮相关代码；没有接入的项目不创建文件。
 - **Stop（可选）**：默认不生成，也不读取状态或扫描输入。明确选择每回合结束提醒时，加 `--check-on-stop` 生成对应配置；explore/shape/recover 或 needs-user/blocked/paused 跳过，其余只提醒证据缺口，不执行测试、不强制续跑。项目仍处于 build 不能证明当前回合是实施请求。旧配置若指向本次更新脚本，原来的无参数 Stop 也不再驱动续跑；需要提醒时重新审阅、生成并按宿主要求加载。
-- **可选 PreToolUse**：仅为明确选定的精确工具名，用重复的 `--protect-tool TOOL_NAME` 生成 matcher。对这些调用，未接入记录、读取失败或证据不满足时返回 deny；通过时返回空对象，让宿主继续正常权限流程。不要泛配所有 shell 调用，否则可能把修复/验证本身锁死。
+- **可选 PreToolUse**：仅为明确选定的精确工具名，用重复的 `--protect-tool TOOL_NAME` 生成 matcher。未接入记录、读取失败或证据不满足时返回 deny。保护脚本自身遇到无法处理的异常时以退出码 2 报告。核对通过时返回空对象，让宿主继续正常权限流程。请限定工具名，以免拦截修复和验证本身。
 
 未指定保护工具时不生成 PreToolUse。它只覆盖匹配的宿主工具入口，不能保证其他工具、脚本内部调用、发布/付费请求都被拦住。项目配置和数据都可被 agent 修改；真正权限、预算与不可绕过约束由宿主或外部受控系统承担。
 

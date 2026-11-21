@@ -111,6 +111,26 @@ class RepositoryTests(unittest.TestCase):
         self.write("README.md", "[ref]: docs/missing.md\n[use][ref]\n")
         self.assertFalse(self.check()["ready"])
 
+    def test_links_after_inline_code_include_paths_with_parentheses(self):
+        self.write("docs/available(v1).md", "content")
+        self.adopt()
+        self.write("README.md", "```cmd``` 是行内示例\n"
+                   "    ``` 这是缩进代码行\n"
+                   "[已有说明](docs/available(v1).md)\n"
+                   "[说明](docs/guide(v2).md)\n"
+                   "[页面](app/(dashboard)/page.md \"页面说明\")\n")
+        self.assertEqual(repository.broken_links(self.root, ["README.md"]),
+                         [["README.md", "app/(dashboard)/page.md"], ["README.md", "docs/guide(v2).md"]])
+        self.assertFalse(self.check()["ready"])
+
+    def test_unresolvable_symlink_is_reported_as_broken_link(self):
+        self.adopt()
+        self.write("README.md", "[Reference](docs/current-link.md)\n")
+        (self.root / "docs/current-link.md").symlink_to("current-link.md")
+        result = self.check()
+        self.assertFalse(result["ready"])
+        self.assertIn("新增失效引用：README.md → docs/current-link.md", result["errors"])
+
     def test_reintroduced_link_after_repair_and_checkpoint_is_new_failure(self):
         self.write("README.md", "[old](missing.md)")
         self.adopt()

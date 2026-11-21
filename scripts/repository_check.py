@@ -118,27 +118,29 @@ def broken_links(root: Path, sources: list[str]) -> list[list[str]]:
         lines = []
         for line in workflow.read_text(path, 1_000_000).splitlines():
             if fence:
-                if re.fullmatch(r"\s*" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}\s*", line):
+                if workflow.fence_end(line, fence):
                     fence = None
                 continue
-            opening = re.match(r"\s*(`{3,}|~{3,})", line)
-            if opening:
-                fence = opening[1]
-                continue
-            if line.startswith(("    ", "\t")):
+            fence = workflow.fence_start(line)
+            if fence or line.startswith(("    ", "\t")):
                 continue
             lines.append(re.sub(r"(`+).*?\1", "", line))
         text = "\n".join(lines)
-        targets = re.findall(r"\]\(\s*(?:<([^>\n]+)>|([^\s()]+))(?:\s+[^\n)]*)?\)", text)
+        targets = re.findall(r"\]\(\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^\s()]*\))+))(?:\s+[^\n)]*)?\)", text)
         targets += re.findall(r"^ {0,3}\[[^\]\n]+\]:\s*(?:<([^>\n]+)>|(\S+))", text, re.M)
         for angle, plain in targets:
             target = angle or plain
             url = urlsplit(target)
             if url.scheme or url.netloc or not url.path or url.path.startswith("/"):
                 continue
-            destination = (path.parent / unquote(url.path)).resolve()
-            if not destination.is_relative_to(root) or not destination.exists():
-                broken.add((name, target))
+            try:
+                destination = (path.parent / unquote(url.path)).resolve()
+                if destination.is_relative_to(root) and destination.exists():
+                    continue
+            except (OSError, RuntimeError):
+                # 无法解开的符号链接也属于失效引用。
+                pass
+            broken.add((name, target))
     return [list(item) for item in sorted(broken)]
 
 
@@ -160,14 +162,14 @@ def require_scope(scope: str | None) -> str:
 def git_origin(root: Path) -> dict | None:
     try:
         probe = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-                               capture_output=True, text=True, timeout=5)
+                               capture_output=True, timeout=5)
         if probe.returncode != 0:
             return None
         values = {}
         for key, args in (("branch", ["symbolic-ref", "--short", "HEAD"]),
                           ("head", ["rev-parse", "--verify", "HEAD"])):
             result = subprocess.run(["git", "-C", str(root), *args],
-                                    capture_output=True, text=True, timeout=5)
+                                    capture_output=True, encoding="utf-8", errors="surrogateescape", timeout=5)
             values[key] = result.stdout.strip() if result.returncode == 0 else None
         return values
     except FileNotFoundError:
@@ -321,7 +323,7 @@ def review(root: Path, policy_name: str, rule_id: str, reason: str, *, scope: st
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("adopt", "check", "review", "checkpoint"))
-    parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--root", type=Path, default=Path.cwd(), help="项目根目录，默认使用命令的当前目录。")
     parser.add_argument("--policy", default=POLICY)
     parser.add_argument("--scope", required=True, help="沿用当前工作线/增量标识；普通继续开发不更换。")
     parser.add_argument("--rule")
@@ -348,9 +350,13 @@ def main() -> int:
                 print("其余问题请用 --json 查看。")
         return 0 if result["ready"] else 1
     except (workflow.WorkflowError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as error:
-        print(json.dumps({"ready": False, "error": str(error)}, ensure_ascii=False), file=sys.stderr)
+        message = str(error)
+        if isinstance(error, FileNotFoundError) and error.filename in {str(root / args.policy), str(root / BASELINE)}:
+            message += f"。当前项目根为 {root}，请核对 --root 和仓库规则或基线文件。"
+        print(json.dumps({"ready": False, "error": message}, ensure_ascii=False), file=sys.stderr)
         return 2
 
 
 if __name__ == "__main__":
+    workflow.configure_cli_output()
     raise SystemExit(main())

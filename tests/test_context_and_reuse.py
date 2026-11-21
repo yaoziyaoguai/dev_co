@@ -36,9 +36,10 @@ class BriefTests(unittest.TestCase):
         self.assertNotIn("wrong", result)
 
     def test_ambiguous_sections_do_not_silently_choose_a_requirement(self):
-        body = "## 当前决定\nA\n## 历史\n" + "history " * 1000 + "\n## 当前决定\nB"
-        result = summarize(body)
-        self.assertIn("同名段落存在歧义", result)
+        for history in ("Short history", "history " * 1000):
+            with self.subTest(length=len(history)):
+                body = "## 当前决定\nA\n## 历史\n" + history + "\n## 当前决定\nB"
+                self.assertIn("同名段落存在歧义", summarize(body))
 
     def test_custom_titles_keep_original_document_structure(self):
         body = "## History\n" + "old\n" * 3000 + "\n## Goal\nShip locally\n## Next\nTest CSV"
@@ -50,6 +51,22 @@ class BriefTests(unittest.TestCase):
     def test_short_record_is_returned_without_another_summary_copy(self):
         body = "# Existing custom format\nDo not deploy.\nNext: test locally.\n"
         self.assertEqual(summarize(body), body.strip())
+
+    def test_short_record_respects_explicit_sections(self):
+        body = "# Current\nDo not deploy.\n## Goal\nShip locally\n## History\nold discussion\n"
+        result = summarize(body, ["Goal"])
+        self.assertIn("Do not deploy.", result)
+        self.assertIn("Ship locally", result)
+        self.assertNotIn("old discussion", result)
+
+    def test_inline_code_and_atx_closing_marks_preserve_selected_headings(self):
+        body = ("## History\n" + "history\n" * 1000
+                + "```cmd``` 是行内示例\n## C#\n语言约束\n## Next ###\n核对命令\n")
+        result = summarize(body, ["C#", "Next"])
+        self.assertIn("## C#（", result)
+        self.assertIn("语言约束", result)
+        self.assertIn("核对命令", result)
+        self.assertNotIn("未闭合代码围栏", result)
 
     def test_global_constraint_before_first_section_is_kept(self):
         body = "# Current\nNever send project data outside this machine.\n## 历史\n" + "history\n" * 1200

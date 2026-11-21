@@ -10,6 +10,7 @@ import shlex
 import sys
 
 import project_workflow as workflow
+from workflow_files import configure_cli_output
 
 
 def configured_root(root: Path) -> Path:
@@ -100,7 +101,7 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", choices=("codex", "claude"), required=True)
-    parser.add_argument("--root", type=Path, help="显式项目根目录；生成配置时固化为绝对路径。")
+    parser.add_argument("--root", type=Path, help="与 CLI 对齐的项目根，生成配置时记录为绝对路径。省略时按事件目录寻找 Git 顶层。")
     parser.add_argument("--state")
     parser.add_argument("--protect", action="store_true")
     parser.add_argument("--print-config", action="store_true")
@@ -118,11 +119,15 @@ def main() -> int:
         result = respond(payload, args.state, args.protect, args.root, args.check_on_stop)
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (OSError, ValueError, TypeError, workflow.WorkflowError) as error:
-        # 保护性执行前检查无法解析时拒绝本次调用；其他事件报告错误，不制造续跑循环。
+    except Exception as error:
+        if not args.protect and not isinstance(error, (OSError, ValueError, TypeError, workflow.WorkflowError)):
+            raise
+        # 保护性 Hook 自身失败时用宿主的阻断退出码报告异常。
         print(str(error), file=sys.stderr)
         return 2 if args.protect else 1
 
 
 if __name__ == "__main__":
+    sys.stdin.reconfigure(encoding="utf-8")
+    configure_cli_output()
     raise SystemExit(main())
