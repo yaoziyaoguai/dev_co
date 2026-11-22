@@ -315,12 +315,15 @@ LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0 python3 -m unittest discover -s test
 
 ### 2026-11-22 v3 修复验证
 
-Codex CLI 0.166.0 和 Claude Code 2.1.330 均从临时 Git 项目的子项目 `src/` 目录启动。两宿主使用临时配置和本地固定模型响应，Hook 加载和工具执行由真实 CLI 处理。
+Codex CLI 0.166.0 和 Claude Code 2.1.330 均从临时 Git 项目的子项目 `src/` 目录启动。两宿主先使用本地固定响应，再在修复版本 `a3435b7` 上各跑一次实际模型会话。两轮均由真实 CLI 加载和执行 Hook，使用会话级临时配置。
 
 | 验证 | 实际结果 |
 | --- | --- |
-| 双宿主 `SessionStart` | 子项目的 `docs` 软链指向父仓共享目录。存在子项目自己的 `CURRENT.md` 时，两宿主都收到子项目标记。子项目没有独立记录时，两宿主都收到父仓标记。 |
-| 双宿主 `PreToolUse` | 配置精确匹配 `Bash`。正常检查通过时，命令创建了测试文件。向就绪检查注入 `RuntimeError` 后，Hook 以退出码 2 结束，两宿主都报告拦截，测试文件均未创建。 |
+| 固定响应的 `SessionStart` | 子项目的 `docs` 软链指向父仓共享目录。有独立 `CURRENT.md` 时，两宿主都收到子项目标记。子项目没有独立记录时，两宿主都收到父仓标记。 |
+| 固定响应的 `PreToolUse` | 配置精确匹配 `Bash`。正常检查通过时，命令创建了测试文件。向就绪检查注入 `RuntimeError` 后，Hook 以退出码 2 结束，两宿主都报告拦截，测试文件均未创建。 |
+| 实际响应模型 | Codex 使用 `gpt-6.2-sol`，Claude Code 使用现有配置返回的 `zcode/GLM-5.3`。 |
+| 实际模型的 `SessionStart` | `docs` 软链指向含干扰标记的父仓共享目录。两模型都准确回显了子项目自身 `CURRENT.md` 的随机标记。 |
+| 实际模型的 `PreToolUse` | 向就绪检查注入 `RuntimeError` 后，Hook 返回退出码 2。两宿主均拦截各自唯一一次 `Bash` 调用，测试文件均未创建。 |
 | macOS 全量回归 | Python 3.14.7 下，默认 UTF-8 和 `LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0` 各通过 175 项，各跳过 1 项仅适用于 Linux 文件系统的用例。 |
 | Linux 全量回归 | Python 3.11.2 下，使用严格 ASCII 环境及实际挂载为 `noexec` 的 `/tmp`，176 项全部通过。 |
 | 评测场景 | 22 个场景均完成初始化和只读核对。独立审查场景仅有预期的两处未暂存差异。 |
