@@ -1,103 +1,50 @@
-# Delivery and Release
+# 实施与交付
 
-**按需读取：** 第一版决定已明确并进入实施，或需要阶段交付、安装、发布检查时使用。已有可用版本可直接选择交付章节。
+**按需读取**　第一版范围已明确，开始持续实施或需要阶段交付、安装和发布检查时使用。
 
-章节导航：开始第一版 → `Execute the first-release contract`、`Repository setup`；实现增量 → `Thin vertical slices`；按风险检查 → `Quality and security`；交付候选 → `Release candidate`；外部发布 → `GitHub and launch`；汇报 → `Final report`。实施时不预读不相关的发布细节。
+章节导航：开始第一版 → `第一版范围`、`仓库准备`；实现增量 → `端到端小步实施`；按风险检查 → `质量与安全`；交付候选 → `交付候选验证`；外部发布 → `GitHub 与发布`；汇报 → `交付摘要`。
 
-适用边界：第一版范围与验收沿用当前记录；只补缺口。个人项目 PR 可选，提交/推送/部署依据现有授权；本地、真实服务、部署和用户验收的证据分别报告，不能由前者推定后者。
+个人项目按需使用 PR。提交、推送和部署依据当前授权。本地检查、分发安装、线上运行和用户验收各需对应证据。
 
-## Execute the first-release contract
+## 第一版范围
 
-Use the accepted first-release contract and delivery target in the current project record. If missing, consult [第一版可以开始实施的条件](new-project.md#第一版可以开始实施的条件) to resolve the actual gap while carrying forward settled decisions. Make that complete value loop the next release candidate. Recovery covers credible blocking failures; the result is what the user actually needs. Revise the contract when evidence changes the decision, and record the reason.
+沿用当前记录中已接受的第一版结果、验收标准和交付目标。只补 [第一版可以开始实施的条件](new-project.md#第一版可以开始实施的条件) 中的实际缺口。先完成用户能获得结果且能从关键故障中恢复的闭环，再扩展功能。证据要求改向时，记录原因和受影响的验收条件。
 
-Finish this releasable loop before expanding the product surface. Do not spread implementation across multiple unfinished workflows, and do not let optional features displace release-candidate completion.
+## 仓库准备
 
-## Repository setup
+先明确本轮成果、范围、文件和证明方式。已有仓库保留结构与原生验证，规则只覆盖当前增量和直接受影响的资料。新仓库按第一版需要选择运行时与依赖、模块边界、忽略规则、无密钥配置示例、测试与格式化命令、适用的 CI、README 和交付方式。对外分发需要明确许可。
 
-Before creating or changing a repository, define the outcome, non-goals, expected files, and proof. Reuse an existing repository when it already represents the product; do not create a second repository to avoid understanding the first.
+首次持续实施前按[仓库增量维护](repository-lifecycle.md)确认归属、更新义务和必要检查。在阶段出口核对，输入未变时复用有效证据。
 
-For a new repository, add only what the first release needs. Typical decisions include:
+## 端到端小步实施
 
-- runtime and dependency manager;
-- project structure and module boundaries;
-- `.gitignore` and configuration example without secrets;
-- test and formatting commands;
-- CI for the relevant checks;
-- README with install, run, verify, and current limitations;
-- license choice when distributing externally, explicitly decided rather than assumed;
-- release or deployment path.
+先做一条可验证的真实用户流程。按需贯通界面、领域逻辑和基础设施，保留既有接口、数据语义与行为。实现或证明方式难以从项目事实推导时，参照[项目适配](project-fit.md)。
 
-Publish or push only within current authorization.
+1. 定义预期的用户行为和最小有效检查。
+2. 沿用现有约定实现。只有真实职责边界、难以撤销的依赖或已有复用需求，才提取抽象。
+3. 核对差异的范围和遗留脚手架，实质逻辑变更按[增量反防御清理](specialist-skills.md#增量反防御清理)处理。
+4. 检查可信失败与恢复场景，保持仓库可构建。
 
-Before the first sustained implementation, follow [the repository lifecycle](repository-lifecycle.md) to assign ownership and documentation obligations. Set up any needed checks before editing. In an existing project, keep the structure and native verification and apply the new agreements to the current increment and directly affected material. Check at the phase boundary and reuse evidence for unchanged inputs.
+## 质量与安全
 
-## Thin vertical slices
+按影响核对正确性、恢复、信任边界校验、鉴权、密钥和依赖、隐私与日志、代表性负载的性能和成本。涉及外部 API 时检查限速、重试、幂等和部分失败；涉及持久数据时验证迁移与回滚。
 
-Build the first end-to-end user-visible workflow before broad foundations. The slices should converge on the first-release contract rather than creating several disconnected happy paths. Each slice should cross the necessary UI, domain, and infrastructure boundaries while remaining small enough to verify.
+界面层级、密度、状态或响应式行为变化时，按[界面设计与验证](ui-design.md)核对实际渲染和用户任务。失败、超时或截断的检查标记为未通过。演示路径只覆盖实际走过的行为。
 
-For an existing product, select the increment from the affected user's actual task and preserve the relevant interfaces, data semantics, and established behavior. Connect project facts to the implementation choice and its proof; use [project fit](project-fit.md) only when that connection is unclear. A new feature does not reopen the whole product or require every layer to change.
+## 交付候选验证
 
-For each slice:
+从新使用者视角验证配置、核心任务、可信故障恢复和输出质量，按交付目标补足证据。
 
-1. define expected user-visible behavior;
-2. write or identify the smallest meaningful check;
-3. implement using existing conventions;
-4. inspect the diff for accidental scope and dead scaffolding, applying [incremental defensive-code cleanup](specialist-skills.md#增量反防御清理) for non-trivial logic changes;
-5. run the final checks for the slice, including credible failures and edge cases;
-6. keep the repository in a buildable state.
+- **本地使用**　运行文档中的命令并核对所需输入。
+- **打包分发**　核对打包、签名与权限，在干净环境安装。
+- **服务部署**　在实际环境核对配置、访问、健康状态、日志和回滚。
 
-Add abstraction only for a real boundary, irreversible dependency, or multiple actual callers.
+分发或部署时核对适用的更新、回滚和反馈入口。确有用途并已告知时才纳入分析统计。
 
-## Quality and security
+## GitHub 与发布
 
-Apply review proportional to risk. Check:
+公开前核对仓库可见性、将公开的文件和历史、许可、发布产物、文档与已知限制、网络和遥测行为及部署目标。确认当前授权覆盖操作与目的地。授权缺失或目标发生实质变化时才询问。发布后核对实际可访问的产物。
 
-- correctness and recovery paths;
-- accessibility and responsive behavior for user interfaces;
-- authentication and authorization where present;
-- validation at trust boundaries;
-- secret handling and dependency risk;
-- privacy, retention, deletion, and logging;
-- rate limits, retries, idempotency, and partial failure for external APIs;
-- cost and performance for representative workloads;
-- migration and rollback for persistent data;
-- documentation and operator visibility.
+## 交付摘要
 
-For changes to UI hierarchy, density, states, or responsive behavior, use [UI design and verification](ui-design.md) on the affected surface. Reuse existing design decisions and inspect actual rendering and the relevant task; a local style fix does not require a full design audit. Report visual and behavioral evidence separately when either is unverified.
-
-Do not call the project ready while relevant tests fail, output is truncated, or only a demo path was checked.
-
-## Release candidate
-
-Verify the complete value loop against the agreed delivery target before optional polish or expansion. From a clean user perspective, check setup, core task completion, credible failure recovery, and output quality, including export when required. Add only the checks implied by the delivery target:
-
-- **Local use:** verify the documented run command and required local inputs. Packaging or deployment is not a completion condition.
-- **Packaged distribution:** verify packaging, platform-required signing and permissions, and installation in a clean environment.
-- **Deployed service:** verify deployment, environment configuration, access, health, logs, and rollback against the actual deployed service.
-
-For distribution or deployment, check the applicable update or rollback path and support/feedback route. Include analytics only when justified and disclosed. Report local, packaged, and deployed evidence separately; one does not prove another.
-
-## GitHub and launch
-
-Before public release, show:
-
-- repository visibility;
-- files and history that will become public;
-- license;
-- release artifacts;
-- documentation and known limitations;
-- any telemetry or network behavior;
-- deployment destination.
-
-Check that current authorization covers the intended remote, push, publication, or deployment. Ask only when it is absent or the target or action has materially changed; do not repeat an already answered approval request. After release, verify the public artifact rather than assuming the command succeeded.
-
-## Final report
-
-Report:
-
-- user-visible outcome;
-- files and architecture boundaries changed;
-- exact checks performed;
-- release or deployment status;
-- known caveats and unverified behavior;
-- next evidence to collect from users.
+说明用户可见结果、相关文件与架构边界、实际执行的检查、交付或部署状态、缺口及后续要收集的证据。以当前记录保留必要的接手信息。

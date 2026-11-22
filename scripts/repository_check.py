@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -18,13 +19,37 @@ import workflow_files as workflow
 POLICY = "devco-repository.json"
 BASELINE = workflow.REPOSITORY_BASELINE
 REVIEWS = ".project-workflow/repository-reviews.json"
+LINK_DESTINATION = r"\(\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^\s()]*\))*))(?:\s+[^\n)]*)?\)"
+
+
+def repository_context_root(cwd: Path, policy_name: str) -> Path:
+    cwd = cwd.resolve()
+    configured = workflow.discover_project_root(cwd, lambda root: workflow.project_marker(root, BASELINE) is not None
+                                                or workflow.project_marker(root, policy_name) is not None)
+    if configured != cwd:
+        from project_workflow import locate_state
+
+        # 状态单独存在时仍是子项目边界，不能借用其上级的仓库基线。
+        for root in (cwd, *cwd.parents):
+            if root == configured:
+                break
+            if locate_state(root) is not None:
+                return root
+    return configured
 
 
 def load_json(root: Path, name: str) -> dict:
     path = workflow.safe_path(root, name, no_symlinks=True)
     if workflow.secret_like(Path(name)):
         raise workflow.WorkflowError("规则和检查记录不得使用凭据路径：" + name)
-    value = json.loads(workflow.read_text(path, 8_000_000))
+    try:
+        text = workflow.read_text(path, 8_000_000)
+    except FileNotFoundError as error:
+        raise workflow.WorkflowError(
+            f"找不到仓库规则或检查记录 {workflow.path_text(path)}。"
+            f"当前项目根为 {workflow.path_text(root.resolve())}，请核对 --root 与相对路径 {name}。"
+        ) from error
+    value = json.loads(text)
     if not isinstance(value, dict):
         raise workflow.WorkflowError("需要 JSON 对象：" + name)
     return value
@@ -44,8 +69,11 @@ def path_names(root: Path, values: object, *, directories: bool = False) -> list
 
 def load_policy(root: Path, name: str) -> dict:
     policy = load_json(root, name)
-    if policy.get("schema") != 1 or set(policy) - {"schema", "paths", "required", "links", "updates", "ignore"}:
+    fields = {"schema", "paths", "required", "links", "updates", "ignore", "check_anchors"}
+    if policy.get("schema") != 1 or set(policy) - fields:
         raise workflow.WorkflowError("仓库规则 schema 必须为 1，且不能含未知字段。")
+    if "check_anchors" in policy and not isinstance(policy["check_anchors"], bool):
+        raise workflow.WorkflowError("check_anchors 必须为布尔值。")
     paths = policy.get("paths")
     if not isinstance(paths, dict) or not paths or not all(isinstance(v, str) and v.strip() for v in paths.values()):
         raise workflow.WorkflowError("paths 需要将文件/目录路径映射到具体职责。")
@@ -131,7 +159,11 @@ def markdown_anchors(path: Path) -> set[str]:
         explicit.update(re.findall(r'<a\s+(?:id|name)=["\']([^"\']+)["\']', line))
         heading = workflow.atx_heading(line, max_level=6)
         if heading:
-            title = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"\1", heading[1])
+            title = re.sub(r"!?\[([^\]]*)\]" + LINK_DESTINATION, r"\1", heading[1])
+            title = re.sub(
+                r"(`+)(.+?)\1|(?<![0-9A-Za-z_])_([^_]+)_(?![0-9A-Za-z_])",
+                lambda match: match[2] if match[1] is not None else match[3], title,
+            )
             base = re.sub(r"[^\w -]", "", title.lower()).strip().replace(" ", "-")
             slug, suffix = base, 1
             while slug in generated:
@@ -152,7 +184,7 @@ def broken_links(root: Path, sources: list[str], *, check_anchors: bool = False)
         if not path.is_file():
             continue  # 必须保留的入口由 required 声明；可选资料允许归档/删除。
         text = "\n".join(re.sub(r"(`+).*?\1", "", line) for line in markdown_lines(path))
-        targets = re.findall(r"\]\(\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^\s()]*\))+))(?:\s+[^\n)]*)?\)", text)
+        targets = re.findall(r"\]" + LINK_DESTINATION, text)
         targets += re.findall(r"^ {0,3}\[[^\]\n]+\]:\s*(?:<([^>\n]+)>|(\S+))", text, re.M)
         for angle, plain in targets:
             target = angle or plain
@@ -181,7 +213,7 @@ def observe(root: Path, policy: dict) -> dict:
               for rule in policy.get("updates", [])}
     documents = fingerprints(root, [p for rule in policy.get("updates", []) for p in rule["documents"]])
     return {"files": files, "inputs": inputs, "documents": documents,
-            "broken_links": broken_links(root, policy.get("links", []))}
+            "broken_links": broken_links(root, policy.get("links", []), check_anchors=policy.get("check_anchors", False))}
 
 
 def require_scope(scope: str | None) -> str:
@@ -341,6 +373,8 @@ def checkpoint(root: Path, policy_name: str = POLICY, *, scope: str | None = Non
 
 
 def switch_scope(root: Path, policy_name: str, scope: str, next_scope: str) -> dict:
+    from project_workflow import load_state, locate_state
+
     root = root.resolve()
     next_scope = require_scope(next_scope)
     if scope == next_scope:
@@ -351,7 +385,23 @@ def switch_scope(root: Path, policy_name: str, scope: str, next_scope: str) -> d
     result = assess(root, policy, baseline, observed)
     if not result["ready"]:
         return result
-    archive = workflow.safe_path(root, ".project-workflow/archive/" + uuid4().hex, no_symlinks=True)
+    warnings = result["warnings"]
+    try:
+        state = locate_state(root)
+        if state is not None:
+            meta, _ = load_state(state)
+            verification = meta.get("verification")
+            if isinstance(verification, dict) and verification.get("repository_scope") == scope:
+                warnings.append(f"请同步将 {workflow.path_text(state.relative_to(root))} 中的 "
+                                f"verification.repository_scope 更新为 {next_scope}。")
+    except (workflow.WorkflowError, OSError, UnicodeDecodeError) as error:
+        warnings.append(f"无法核对当前状态记录的工作线：{error}")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", scope).strip("._-")[:24]
+    if not slug:
+        slug = "scope"
+    archive = workflow.safe_path(root, f".project-workflow/archive/{stamp}-{slug}-{uuid4().hex[:8]}",
+                                 no_symlinks=True)
     archive.mkdir(parents=True)
     for name in (BASELINE, REVIEWS):
         path = workflow.safe_path(root, name, no_symlinks=True)
@@ -360,7 +410,7 @@ def switch_scope(root: Path, policy_name: str, scope: str, next_scope: str) -> d
     record_baseline(root, policy_name, policy, observed, next_scope)
     workflow.safe_path(root, REVIEWS, no_symlinks=True).unlink(missing_ok=True)
     archive_path = workflow.path_text(archive)
-    return {"ready": True, "scope": next_scope, "archive": archive_path,
+    return {"ready": True, "scope": next_scope, "archive": archive_path, "warnings": warnings,
             "git_origin": git_origin(root), "message": f"已切换工作线。旧基线和核对记录归档在 {archive_path}。"}
 
 
@@ -403,8 +453,7 @@ def main() -> int:
         policy_name = workflow.path_text(args.policy)
         scope = workflow.path_text(args.scope)
         if args.root is None and args.command != "adopt":
-            from project_workflow import project_context_root
-            root = project_context_root(root)
+            root = repository_context_root(root, policy_name)
         if args.command == "review":
             rule = workflow.path_text(args.rule) if args.rule else None
             result = review(root, policy_name, rule, workflow.path_text(args.reason), scope=scope)
@@ -426,10 +475,7 @@ def main() -> int:
                 print("其余问题请用 --json 查看。")
         return 0 if result["ready"] else 1
     except (workflow.WorkflowError, OSError, ValueError, TypeError, subprocess.TimeoutExpired) as error:
-        message = str(error)
-        if isinstance(error, FileNotFoundError) and error.filename in {str(root / args.policy), str(root / BASELINE)}:
-            message += f"。当前项目根为 {root}，请核对 --root 和仓库规则或基线文件。"
-        print(json.dumps({"ready": False, "error": message}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps({"ready": False, "error": str(error)}, ensure_ascii=False), file=sys.stderr)
         return 2
 
 

@@ -1,109 +1,37 @@
-# Product Form, Architecture, and Risk
+# 产品形态、架构与风险
 
-**按需读取：** 当前需要选择产品形态、数据边界或关键架构时使用；成熟模块的局部修改不重新选型。输出有依据的推荐、影响与重议条件，写回已有决定记录。
+**按需读取**　产品形态、数据边界或关键架构待定时使用。把推荐、影响和重议条件写入当前决定记录。
 
-章节导航：产品形态 → `Product form before feature list`；领域与数据 → `Domain and data model`；结构/选型 → `Architecture decisions`；失败情形 → `Red-team questions`；留依据 → `Decision record`。只展开本轮取舍相关章节。
+章节导航：产品形态 → `产品形态与使用路径`；领域与数据 → `领域与数据模型`；选型 → `架构取舍`；失败情形 → `风险核对`；留依据 → `决定记录`。
 
-适用边界：按实际约束比较，原型证据改变前提时复核，避免假想规模。用用户可判断的效果、成本和维护代价解释选择；不把陌生技术菜单交还用户，不重复已接受的取舍。
+成熟模块的局部修改沿用已定结构。原型证据改变前提时复核，用用户能判断的效果、成本和维护代价解释取舍。
 
-## Product form before feature list
+## 产品形态与使用路径
 
-Define:
+明确谁执行任务、什么触发、何时拿到第一个有价值的结果，以及需要哪些证据才会信任结果。按项目目标确定购买方与预算负责人、内部发起方，或开源采用者与维护者。
 
-- the user who performs the workflow;
-- the buyer and budget owner for commercial work, sponsor for internal work, or adopter and maintainer for open source when relevant;
-- the trigger that starts the workflow;
-- the result they receive;
-- time to first value;
-- the minimum trust evidence they require;
-- whether delivery is a library, CLI, application, service, API, report, managed workflow, marketplace, or a hybrid;
-- why the work repeats often enough when the intended model depends on recurring use or revenue.
+选择能交付该结果的形态，如库、CLI、应用、服务、API、报告或人工托管流程。需要重复使用或持续收入时，核对需求频率、获客和分发渠道。按实际流程走一遍入口、配置、首次获得价值、重复使用、失败恢复及适用的导出、删除、升级和取消。多角色流程明确各方权限、数据归属和交接点。
 
-Treat acquisition, distribution, and business model as project decisions. Test whether the proposed channel reaches the intended user and supports the intended outcome.
+## 领域与数据模型
 
-Map the relevant user journey, including entry, setup, first value, recurring use, failure recovery, export, and data deletion where applicable. Add upgrade and cancellation only when the product model includes them. Do not design only the happy path.
+找出语义必须稳定的领域对象，确定身份、归属、生命周期、权威来源、敏感字段和关系。沿数据路径核对获取与授权、归一化与校验、存储与保留、业务或模型处理、纠错与删除、导出与同步。模型或易变化的外部数据影响判断时，展示来源、不确定性和更新时间。
 
-For multi-role B2B workflows, when applicable, map each actor's authority, data ownership, and handoff to the next actor. Do not introduce enterprise role machinery when the workflow does not require it.
+## 架构取舍
 
-## Domain and data model
+用第一版工作流和原型证据确定边界。只比较能改变决定的条件，包括目标平台、实际数据量与并发、延迟与离线要求、隐私与数据驻留、固定与单次成本、团队运维能力。缺数据时给区间，用小试验验证关键假设。
 
-Identify the few domain objects whose meaning must remain stable. For each, define ownership, lifecycle, identity, source of truth, sensitive fields, and relationships.
+按需比较自建与购买、模块职责、本地与云端、同步与异步、批处理与实时、租户形态。沿触发到结果的路径检查组件、输入输出、权威来源和信任边界，明确可预期失败、恢复方式和成本。外部依赖要核对限速、重试、幂等、部分失败和退出；有持久状态时核对可观测性、迁移、更新与回滚。
 
-Trace data from origin to user-visible result:
+据此选运行时、框架、存储、鉴权、供应商和部署方式。成熟方案满足约束时优先采用。存在实质不同的路线时，比较最小可交付方案、推荐方案和一个切实可行的替代方案，说明交付时间、运行与替换代价及可逆性。只向用户确认他们才能决定的约束。
 
-- acquisition and authorization;
-- normalization and validation;
-- storage and retention;
-- model or business-rule processing;
-- provenance and confidence;
-- correction and deletion;
-- export and downstream synchronization.
+## 风险核对
 
-When model-generated, probabilistic, or changing external-source outputs influence business decisions, expose provenance, uncertainty, and last-updated time rather than hiding them behind a single score.
+- 外部权限、供应商限速、接口或模型变化会阻断哪一步？关键数据是否可得，异构数据是否会把工作转为人工作业？
+- 用户能否核对、纠正并恢复结果？哪条假设一旦不成立就要推翻方案？
+- 按项目目的核对风险。商业项目关注问题频率、买家预算、定价与分发、订阅复用和获客成本；内部工具关注发起方与采用阻力；开源关注维护、贡献和生态兼容。由人工服务转为软件时，验证环节能否标准化。
 
-## Architecture decisions
+对每项可信风险安排规避、测试、缩小范围或明确接受。
 
-Derive candidate architecture from the current product workflow and actual constraints, then finalize it after reviewing the applicable prototype or spike evidence. Compare only constraints that could change the decision:
+## 决定记录
 
-- target platform;
-- credible data volume and concurrency;
-- latency, reliability, and offline requirements;
-- privacy and data-residency boundaries;
-- acceptable fixed and per-operation cost;
-- the team's operational capacity.
-
-Use ranges where exact values are unavailable. Mark consequential unknowns explicitly and resolve them with the smallest useful spike instead of inventing scale or expanding into a generic non-functional-requirements checklist.
-
-Evaluate the applicable structural choices, including build versus buy, information-hiding boundaries, local versus cloud execution, synchronous versus asynchronous work, batch versus real-time processing, single versus multi-tenant operation, external-service volatility and rate limits, critical vendor exit, retries, idempotency, partial failure, recovery, observability, migration, updates, and rollback.
-
-Then choose, as applicable, the runtime, framework, storage, authentication and authorization approach, model or provider, and deployment shape that fit those constraints. Prefer mature, well-understood technology that shortens the path to a reliable release unless a real requirement disqualifies it. Record why the chosen stack wins, its important lock-in or replacement cost, and what evidence would reopen the decision.
-
-Do not hand an unfamiliar technology menu to the user. Explain choices through user-visible behavior, delivery time, cost, operational burden, risk, and reversibility; recommend one option and ask the user only about priorities or constraints they uniquely control.
-
-When multiple architecture shapes are meaningfully distinct, compare:
-
-1. **Smallest coherent release** — fewest moving parts that proves the value.
-2. **Recommended architecture** — protects the real boundaries of the agreed first-release scope.
-3. **Alternative** — buy, integrate, managed service, local-first, batch instead of real-time, or another materially different model.
-
-Walk the critical path from the user's trigger to the promised result. At each hop, identify the responsible component, input and output, source of truth, trust boundary, credible failure, recovery behavior, and material cost. Use this walkthrough to expose missing boundaries and operational work before implementation.
-
-Do not build for imagined scale. Do avoid irreversible coupling to an unstable platform when a narrow adapter or stored source data protects the project.
-
-## Red-team questions
-
-Apply only questions that fit the project's intent.
-
-Common questions:
-
-- Can an upstream platform block access or invalidate the workflow?
-- Does data heterogeneity turn software into manual operations?
-- Does the product require data that cannot be obtained or that users will not provide?
-- Can users verify the output, correct it, and recover from errors?
-- What fails when the model, API, or upstream schema changes?
-- Which assumption, if false, kills the architecture rather than one feature?
-
-For commercial projects, also ask:
-
-- Is the problem frequent and costly enough to fund the solution?
-- Does the named buyer control a budget?
-- Does the proposed metric connect to a business outcome or only vanity?
-- Does pricing and distribution fit how the buyer purchases?
-
-For subscription models, test recurring value and retention. For paid acquisition, test acquisition cost against lifetime value. For service-to-software projects, test whether the human work can actually be standardized. For platform-dependent projects, test access rights and platform control.
-
-For internal or open-source projects, replace commercial questions with sponsor durability, adoption friction, maintainership, governance, contribution cost, and ecosystem compatibility as relevant.
-
-Turn each credible failure into a mitigation, test, explicit acceptance, or scope reduction. Do not hide unresolved risk in “future work.”
-
-## Decision record
-
-For each load-bearing architecture choice, record:
-
-- context and constraint;
-- options considered;
-- decision and rationale;
-- consequences and tradeoffs;
-- evidence that would trigger reconsideration.
-
-Use a small ADR or the project decision record. Avoid architecture documents that only describe boxes without explaining why the boundaries exist.
+在已有记录或短篇 ADR 写清背景与约束、比较过的方案、当前决定与理由、影响及重议证据。描述边界时补上它存在的原因。

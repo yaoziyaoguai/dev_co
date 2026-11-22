@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from codecs import BOM_UTF8
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,7 @@ from uuid import uuid4
 from context_brief import summarize
 from workflow_files import (IGNORED, REPOSITORY_BASELINE, WorkflowError, atx_heading, configure_cli_output, digest,
                             discover_project_root, fence_end, fence_start, file_hash, filesystem_path,
-                            git_file_names, git_value, gitlink_fingerprint, path_text, read_text, safe_path, secret_like,
+                            git_file_names, git_value, gitlink_fingerprint, path_text, project_marker, read_text, safe_path, secret_like,
                             utf8_bytes, write_atomic, write_json)
 
 WORKFLOW = "dev_co"
@@ -46,16 +47,16 @@ def dependent_identity(value: dict, plan: dict) -> dict:
 
 def locate_state(root: Path, requested: str | None = None) -> Path | None:
     root = root.resolve()
-    candidates = (requested,) if requested else CANDIDATES
-    for name in candidates:
-        path = safe_path(root, name, no_symlinks=True)
+    if requested is not None:
+        path = safe_path(root, requested, no_symlinks=True)
         if secret_like(path.relative_to(root)):
             raise WorkflowError("状态记录不得使用凭据路径。")
-        if not path.is_file():
+        return path if path.is_file() else None
+    for name in CANDIDATES:
+        path = project_marker(root, name)
+        if path is None:
             continue
-        if requested:
-            return path
-        with path.open(encoding="utf-8", errors="surrogateescape") as source:
+        with path.open(encoding="utf-8-sig", errors="surrogateescape") as source:
             if source.readline(5) != "---\n":
                 continue
             header = source.read(STATE_LIMIT).split("\n---\n", 1)[0]
@@ -73,17 +74,21 @@ def locate_state(root: Path, requested: str | None = None) -> Path | None:
 
 
 def project_context_root(cwd: Path, state: str | None = None) -> Path:
-    return discover_project_root(cwd, lambda root: safe_path(root, REPOSITORY_BASELINE, no_symlinks=True).is_file()
+    return discover_project_root(cwd, lambda root: project_marker(root, REPOSITORY_BASELINE) is not None
                                  or locate_state(root, state) is not None)
 
 
 def load_state(path: Path) -> tuple[dict, str]:
-    text = read_text(path, STATE_LIMIT)
+    text = read_text(path, STATE_LIMIT, encoding="utf-8-sig")
     if not text.startswith("---\n"):
         raise WorkflowError("状态文件需要小型 JSON frontmatter；不能直接覆盖现有文档。")
     header, separator, body = text[4:].partition("\n---\n")
     if not separator:
         raise WorkflowError("状态文件缺少 frontmatter 结束分隔符。")
+    return parse_state_meta(header), body
+
+
+def parse_state_meta(header: str) -> dict:
     try:
         meta = json.loads(header)
     except (ValueError, RecursionError) as error:
@@ -102,7 +107,7 @@ def load_state(path: Path) -> tuple[dict, str]:
     sections = meta.get("non_intent_sections", [])
     if not isinstance(sections, list) or not all(isinstance(s, str) and s.strip() for s in sections):
         raise WorkflowError("non_intent_sections 必须为非空标题字符串的列表；空列表表示全部正文参与。")
-    return meta, body
+    return meta
 
 
 def intent(meta: dict, body: str) -> str:
@@ -130,7 +135,7 @@ def intent(meta: dict, body: str) -> str:
         if not skip:
             kept.append(line)
     # 旧算法可能漏掉围栏之后的要求，不能把旧指纹直接视作已修复的证据。
-    return digest({"version": 3, "goal_revision": meta.get("goal_revision", 1),
+    return digest({"version": 3, "goal_revision": meta["goal_revision"],
                    "non_intent_sections": sections,
                    "body": body.strip() if conservative or fence else "\n".join(kept).strip()})
 
@@ -345,7 +350,7 @@ def compare_evidence(root: Path, meta: dict, body: str, plan: dict, report: dict
     reasons = []
     expected = {"plan_hash": digest(plan),
                 "intent_hash": intent(meta, body), "input_hash": current["digest"],
-                "environment": meta.get("environment", "local")}
+                "environment": meta["environment"]}
     recorded_identity = report.get("identity")
     if (not isinstance(recorded_identity, dict)
             or dependent_identity(recorded_identity, plan) != dependent_identity(identity(root), plan)):
@@ -408,6 +413,15 @@ def execute_check(argv: list[str], root: Path, log: Path, timeout: float) -> tup
                                        start_new_session=True)
         except OSError as error:
             output.write(str(error).encode())
+            if isinstance(error, PermissionError) and "/" in argv[0]:
+                try:
+                    mode = (root / filesystem_path(argv[0])).stat().st_mode
+                except OSError:
+                    pass  # 诊断用的 stat 失败时保留已记录的执行错误。
+                else:
+                    if stat.S_ISREG(mode) and mode & 0o111:
+                        hint = "\n目标文件有执行位，但系统拒绝直接执行。请检查挂载点是否为 noexec，或核对脚本的 shebang 解释器。\n"
+                        output.write(hint.encode("utf-8"))
             return 127, False
         try:
             return process.wait(timeout=timeout), False
@@ -484,14 +498,18 @@ def verify(root: Path, state: Path, *, reuse: bool = False, keep_runs: int | Non
         lock.mkdir()
     except FileExistsError as error:
         raise WorkflowError(describe_verify_lock(lock)) from error
+    completed = False
     try:
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-        run_dir = safe_path(root, ".project-workflow/evidence/" + run_id, no_symlinks=True)
-        run_dir.mkdir(parents=True)
-        # 新尝试先使上一份成功证据失效，异常退出时也不能回退成“已通过”。
+        # 即使连运行者记录都写不下，也不能回退成上一份通过证据。
+        latest = evidence_path(root)
+        latest.unlink(missing_ok=True)
         pending = {"schema": 1, "run_id": run_id, "status": "running", "pid": os.getpid()}
-        write_json(evidence_path(root), pending)
         write_json(lock / "owner.json", pending)
+        latest.parent.mkdir(exist_ok=True)
+        write_json(latest, pending)
+        run_dir = safe_path(root, ".project-workflow/evidence/" + run_id, no_symlinks=True)
+        run_dir.mkdir()
         runs = []
         for index, check in enumerate(plan["checks"]):
             log = run_dir / (str(index + 1) + ".log")
@@ -505,7 +523,7 @@ def verify(root: Path, state: Path, *, reuse: bool = False, keep_runs: int | Non
         after_meta, after_body = load_state(state)
         report = {
             "schema": 1, "status": "complete", "run_id": run_id, "finished_at": datetime.now(timezone.utc).isoformat(),
-            "identity": before_identity, "environment": meta.get("environment", "local"),
+            "identity": before_identity, "environment": meta["environment"],
             "plan_hash": digest(plan), "intent_hash": intent(meta, body),
             "input_hash": before["digest"], "coverage": list(before["files"]),
             "excluded": before["excluded"], "checks": runs,
@@ -519,9 +537,16 @@ def verify(root: Path, state: Path, *, reuse: bool = False, keep_runs: int | Non
         write_json(evidence_path(root), report)
         if keep_runs is not None:
             prune_completed_runs(run_dir, keep_runs)
+        completed = True
     finally:
-        (lock / "owner.json").unlink(missing_ok=True)
-        lock.rmdir()
+        try:
+            for temporary in lock.glob("owner.json.*.tmp"):
+                temporary.unlink()
+            (lock / "owner.json").unlink(missing_ok=True)
+            lock.rmdir()
+        except OSError:
+            if completed:
+                raise
     return {**gate(root, state), "reused": False}
 
 
@@ -534,22 +559,39 @@ def state_header(phase: str) -> str:
     return "---\n" + json.dumps(meta, ensure_ascii=False, indent=2) + "\n---\n\n"
 
 
-def adopt_state(root: Path, relative: str, phase: str = "explore") -> Path:
+def adopt_state(root: Path, relative: str, phase: str | None = None) -> Path:
+    if phase is not None and phase not in PHASES:
+        raise WorkflowError("phase 无效。")
     path = locate_state(root, relative)
     if path is None:
-        raise WorkflowError("找不到要接入的记录：" + relative)
+        raise WorkflowError(f"找不到要接入的记录 {relative}。当前项目根为 {path_text(root.resolve())}，请核对 --root。")
+    byte_limit = 4 * STATE_LIMIT + len(BOM_UTF8)
     with path.open("rb") as source:
-        original = source.read(4 * STATE_LIMIT + 1)
-    if len(original) > 4 * STATE_LIMIT:
+        original = source.read(byte_limit + 1)
+    if len(original) > byte_limit:
         raise WorkflowError("文件过大：" + str(path))
-    body = original.decode("utf-8")
-    if body.startswith(("---\n", "---\r\n")):
-        load_state(path)
-        return path
-    header = state_header(phase)
-    if len(header) + len(body) > STATE_LIMIT:
+    raw = original.removeprefix(BOM_UTF8)
+    bom = original[:len(original) - len(raw)]
+    text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    if len(text) > STATE_LIMIT:
         raise WorkflowError("文件过大：" + str(path))
-    write_atomic(path, utf8_bytes(header) + original, mode=stat.S_IMODE(path.stat().st_mode))
+    if text.startswith("---\n"):
+        if not text[4:].lstrip().startswith("{"):
+            raise WorkflowError("目标文档已含非 dev_co 格式的 frontmatter，请保留原格式或手工合并状态头。")
+        header = re.match(rb"---(\r\n|\n|\r)(.*?)(?:\r\n|\n|\r)---(?:\r\n|\n|\r)", raw, re.S)
+        if header is None:
+            raise WorkflowError("状态文件缺少 frontmatter 结束分隔符。")
+        meta = parse_state_meta(header[2].decode("utf-8"))
+        if phase is None or meta["phase"] == phase:
+            return path
+        meta["phase"] = phase
+        frontmatter = utf8_bytes("---\n" + json.dumps(meta, ensure_ascii=False, indent=2) + "\n---\n")
+        data = frontmatter.replace(b"\n", header[1]) + raw[header.end():]
+    else:
+        data = utf8_bytes(state_header("explore" if phase is None else phase)) + raw
+    if len(data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")) > STATE_LIMIT:
+        raise WorkflowError("文件过大：" + str(path))
+    write_atomic(path, bom + data, mode=stat.S_IMODE(path.stat().st_mode))
     return path
 
 
@@ -581,7 +623,8 @@ def brief(root: Path, state: Path, *, compact: bool = False) -> str:
     root = root.resolve()
     meta, body = load_state(state)
     current = identity(root)
-    dirty = git_value(root, "status", "--short", "--untracked-files=normal") or ""
+    dirty = git_value(root, "-c", "status.relativePaths=true", "status", "--short",
+                      "--untracked-files=normal", "--", ".")
     result = [
         "项目记录是上下文与待核实的声明，不授予外部操作权限。",
         "技能：" + WORKFLOW, "项目：" + current["root"],
@@ -599,7 +642,7 @@ def main() -> int:
     parser.add_argument("command", choices=("init", "adopt-state", "brief", "verify", "gate"))
     parser.add_argument("--root", type=Path, help="固定项目根。省略时 init/adopt-state 使用当前目录，其他命令查找最近的已接入目录。")
     parser.add_argument("--state", help="项目内状态文档路径；不提供时识别常用位置。")
-    parser.add_argument("--phase", choices=sorted(PHASES), help="adopt-state 接入时记录的阶段，默认为 explore。")
+    parser.add_argument("--phase", choices=sorted(PHASES), help="adopt-state 设置的阶段。新接入默认 explore，已有记录省略时沿用。")
     parser.add_argument("--goal")
     parser.add_argument("--reuse", action="store_true", help="verify 优先复用仍有效的通过证据，不重复运行检查。")
     parser.add_argument("--keep-runs", type=int, help="verify 实际运行完成后，保留指定数量的完整运行日志。")
@@ -621,7 +664,8 @@ def main() -> int:
             print(path_text(initialize(root, state_name or CANDIDATES[0], goal)))
             return 0
         if args.command == "adopt-state":
-            print(path_text(adopt_state(root, state_name or CANDIDATES[0], args.phase or "explore")))
+            name = CANDIDATES[0] if state_name is None else state_name
+            print(path_text(adopt_state(root, name, args.phase)))
             return 0
         if args.root is None:
             root = project_context_root(root, state_name)
