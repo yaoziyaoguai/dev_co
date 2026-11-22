@@ -78,3 +78,22 @@ class SkillContentTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("results.csv", result.stdout)
             self.assertIn("new.txt", result.stdout)
+
+    def test_deslop_fixtures_prepare_untracked_source_and_tracked_diff(self):
+        for scenario in ("increment_deslop_before_verify", "standalone_deslop_review"):
+            with self.subTest(scenario=scenario), TemporaryDirectory() as temporary:
+                subprocess.run([sys.executable, str(ROOT / "scripts/eval_scenarios.py"), "prepare",
+                                "--scenario", scenario, "--dest", temporary],
+                               capture_output=True, check=True, timeout=10)
+
+                def git(*args):
+                    return subprocess.check_output(["git", "--no-optional-locks", "-C", temporary, *args],
+                                                   encoding="utf-8", timeout=10).splitlines()
+
+                git("init", "-q")
+                git("add", "--", ".", ":(exclude)amounts.py")
+                if scenario == "increment_deslop_before_verify":
+                    self.assertEqual(git("ls-files", "--others", "--exclude-standard"), ["amounts.py"])
+                else:
+                    git("apply", "fixtures/standalone.patch")
+                    self.assertEqual(git("diff", "--name-only"), ["names.py", "tests/test_names.py"])

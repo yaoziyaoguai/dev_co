@@ -138,6 +138,7 @@ Codex 通常使用 `~/.codex/AGENTS.md`，Claude Code 使用 `~/.claude/CLAUDE.m
 - Do not auto-load `dev_co` for standalone evaluations, benchmarks or model comparisons, results analysis, reports or research, code questions or one-off reviews, throwaway scripts, or small isolated text/configuration/bug fixes. A software repository, code execution, a current-state file, or previous `dev_co` use is not sufficient. Follow applicable project requirements without starting this workflow. Honor explicit invocation, opt-out, and a user-selected primary workflow.
 - When applicable, load it before substantive development using the host's native skill-invocation tool, or read its installed `SKILL.md`. Resolve the catalog path, falling back to `~/.codex/skills/dev_co/SKILL.md` or `~/.claude/skills/dev_co/SKILL.md`; do not rely solely on implicit matching. Reuse loaded content, reloading only after changes or context loss; read references only as needed.
 - Select methods and specialist skills on the user's behalf. Mixed development tasks enter `dev_co` first; pass a concrete UI subtask to an available `compose-ui-kit` entrypoint. Reassess current capability needs when the goal, implementation domain, verification phase, or evidence changes, rather than scanning all skills each turn.
+- Route standalone anti-fallback diff cleanups directly to an available `de-slop`. Within `dev_co`, use it once for non-trivial logic changes before final verification, scoped to the current diff and new source files. Use report-only mode in read-only turns.
 - Carry forward the concrete goal, scope, confirmed constraints, existing artifacts, and required evidence. Do not replace a task with a bare skill menu or repeat settled discovery. Return results to the original task and keep each artifact authoritative in one place.
 - Respect every skill's explicit-only invocation policy. A reference from another skill or workflow does not authorize starting it; use the host's supported loader only after the user selects that workflow.
 ```
@@ -186,6 +187,7 @@ dev_co 组织当前开发目标，专项技能处理本轮确实需要的能力�
 | HTML/CSS 或浏览器端行为的现代实现与兼容性 | `modern-web-guidance` 查询相关原生方案与回退，保留项目浏览器目标及组件约定 |
 | 前后端或服务共享接口变化 | `contract-first` |
 | 需要系统处理当前实现的根因、小步验证和代码质量 | 按任务选用 `ub-mode`，核对完整流程与工具可用性 |
+| 实质逻辑改动完成后需清理过度防御与静默兜底 | 最终验证前用可用的 `de-slop` 检查本轮差异和新增源码，保留输入校验与失败边界。 [适用范围](references/specialist-skills.md#增量反防御清理) |
 | 不知道为什么慢 | 先诊断；多方案量化优化与性能回归检测分别选对应技能 |
 | 需要安全检查 | 区分差异审查、仓库审计与已知漏洞修复 |
 | 合并冲突、数据口径、代码图谱、Figma 或文档同步 | 查相应条目，沿用当前工具与授权；合并冲突不依赖专门技能 |
@@ -307,6 +309,18 @@ LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0 python3 -m unittest discover -s test
 ```
 
 标准库测试覆盖状态兼容、证据失效与复用、进程清理、文件和链接边界、仓库基线、安装与 Hook 输出。修改路由规则时，按[行为评测说明](evals/README.md)在目标宿主选跑合成场景，检查 Agent 的实际动作和产物。
+
+### 2026-11-22 de-slop 接入验证
+
+在临时 Git 项目中使用独立安装的 `de-slop` 验证技能加载、调用顺序和修改范围。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| 双宿主加载 | Codex CLI 0.166.0 用 `$de-slop`，Claude Code 2.1.330 用 `/de-slop`。两个宿主都识别了技能并完成只读报告 |
+| 持续开发 | Codex 实现汇总后检查并清理本轮未跟踪的 `amounts.py`，保留外部 JSON 校验和同文件历史函数。随后运行最终测试和 `verify --reuse`，`gate` 返回 0 |
+| 独立清理 | Claude Code 自行选用 `de-slop`，仅清理本轮差异中的内部兜底。历史函数及暂存区保持原样，3 项针对性测试通过 |
+| 只读验收 | Codex 在 `dev_co` 回合使用 `de-slop` 仅报告。前后的文件内容、Git 状态和暂存区差异一致 |
+| 标准库回归 | Linux 上 Python 3.11.2 的严格 ASCII 环境通过全部 155 项。macOS 上 Python 3.12.2 通过 154 项，跳过 1 项 Linux 专属用例 |
 
 ### 2026-11-22 验证记录
 

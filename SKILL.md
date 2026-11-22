@@ -40,6 +40,7 @@ description: Route sustained software development, product scoping, complex repa
 | 设计或明显调整界面的信息层级、操作主次、布局密度、组件状态或响应式行为 | [ui-design.md](references/ui-design.md) |
 | 编制执行包、接手、需求漂移、记忆冲突或记录结构需整理 | [memory-and-handoff.md](references/memory-and-handoff.md) |
 | 测试范围难判断、证据失效或反复失败 | [verification-and-recovery.md](references/verification-and-recovery.md) |
+| 实质逻辑改动完成后，最终验证前收敛过度防御和静默兜底 | [增量反防御清理](references/specialist-skills.md#增量反防御清理) |
 | 第一版实施、阶段交付或安装发布检查 | [delivery-and-release.md](references/delivery-and-release.md) |
 | 首次持续实施，或目录归属、资料更新与迁移需要约束 | [repository-lifecycle.md](references/repository-lifecycle.md) |
 | 当前开发环节需要哪项设计、工程、测试或优化能力 | [specialist-skills.md](references/specialist-skills.md) |
@@ -47,7 +48,7 @@ description: Route sustained software development, product scoping, complex repa
 
 较长参考资料先看开头的用途与章节导航，再读取所需章节及其适用约束；任务确实跨多个问题时可读多份。已有有效证据可以满足相应阶段，不重做原型或重启立项；系统、CLI 和数据管道使用契约、输入输出、性能或恢复试验，不强加界面流程。
 
-方法选择由 agent 完成。复合开发任务沿用整体目标，在目标、实施领域、验证阶段或证据有变化时，按[专项技能导航](references/specialist-skills.md)判断需要的能力。UI 子任务用宿主可用的 `compose-ui-kit`，入口缺失时沿[界面指南](references/ui-design.md)和宿主现有工具推进。已选主流程和有效证据继续沿用。
+方法选择由 agent 完成。复合开发任务沿用整体目标，在目标、实施领域、验证阶段或证据有变化时，按[专项技能导航](references/specialist-skills.md)判断需要的能力。UI 子任务用宿主可用的 `compose-ui-kit`，入口缺失时沿[界面指南](references/ui-design.md)和宿主现有工具推进。实质业务、数据、状态或接口逻辑初步跑通后，在最终检查和 `verify` 前调用可用的 `de-slop` 检查本轮增量。只读核对仅报告。已选主流程和有效证据继续沿用。
 
 移交时给出具体目标、范围、已确认约束、现有产物和完成证据，读取所选技能后执行适用流程；不以裸技能名调用代替任务，也不重复访谈。先确认宿主及工具可用，不自动补装。结果、证据与未决问题回到原任务；同一产物保留一处权威来源。尊重技能实际的显式调用策略，`lfg`、`review`、`qa` 仅在用户明确选用时加载，不通过入口绕过。
 

@@ -42,8 +42,8 @@ For each slice:
 1. define expected user-visible behavior;
 2. write or identify the smallest meaningful check;
 3. implement using existing conventions;
-4. test failures and edge cases credible for that slice;
-5. inspect the diff for accidental scope and dead scaffolding;
+4. inspect the diff for accidental scope and dead scaffolding, applying [incremental defensive-code cleanup](specialist-skills.md#增量反防御清理) for non-trivial logic changes;
+5. run the final checks for the slice, including credible failures and edge cases;
 6. keep the repository in a buildable state.
 
 Add abstraction only for a real boundary, irreversible dependency, or multiple actual callers.

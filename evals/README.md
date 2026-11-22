@@ -18,9 +18,11 @@
 
 仓库维护新增场景：`new_repository_lifecycle` 从空项目开始，`existing_repository_increment` 保留自定义记录、历史断链和活跃运行数据，`active_project_readonly_turn` 检查持续项目中的只读回合。修改生命周期、摘要或 Hook 时选跑受影响场景，关注实际文件差异、基线时机、可执行出口和重复工作；不能以规则/配置文件存在代替检查已接入。使用显式技能请求的试用只证明执行流程，不记作自动路由通过。
 
+修改反防御清理的时机或范围时，选跑 `increment_deslop_before_verify` 和 `standalone_deslop_review`。前者检查未跟踪源码、外部校验及证据顺序，后者检查独立分流和同文件的历史行为。评审时对照实际技能加载、最终文件和命令记录。
+
 ## 怎样运行
 
-1. 在空临时目录使用 `prepare` 初始化场景。只读场景结束后用 `verify-clean` 重新比较初始文件和运行目录。
+1. 在空临时目录使用 `prepare` 初始化场景。直接使用初始文件的只读场景结束后用 `verify-clean` 核对。需要临时 Git 基线的场景比较试跑前后的工作树与 Git 差异。
 2. 给被测 agent 正常的技能目录与宿主入口配置。测路由时不要强制加载 `dev_co`，也不要告诉它预期触发结果；显式调用测试应单独记录。记录所用全局入口规则，因为入口和技能共同决定行为。
 3. 开一个没有本轮评审历史的会话，仅发送 `user_request`，并告知工作目录。不要发送场景名称、`review` 字段或本文件。agent 可使用正常的文件、终端和必要的本地浏览器工具；不授予推送、发布或付费权限。
 4. 保存工具动作、最终答复和文件差异；由评审者读取 `review`，检查实际产物和运行结果。需要浏览器交互的场景应提供浏览器；缺少工具导致的未验证记为 `inconclusive`，不能以静态检查冒充通过。
@@ -33,6 +35,17 @@ python3 scripts/eval_scenarios.py list
 python3 scripts/eval_scenarios.py prepare --scenario standalone_evaluation --dest "$DEVCO_EVAL_DIR"
 python3 scripts/eval_scenarios.py verify-clean --scenario standalone_evaluation --dest "$DEVCO_EVAL_DIR"
 ```
+
+两个反防御场景在 `prepare` 后需要临时 Git 基线。从各自的临时目录执行。
+
+```sh
+git init -q
+git add -- . ':(exclude)amounts.py'
+git -c user.name=Fixture -c user.email=fixture@example.test \
+  -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm baseline
+```
+
+持续开发场景的 `amounts.py` 应保持未跟踪。独立清理场景在基线提交后运行 `git apply fixtures/standalone.patch`，再发送场景请求。要检查只读分流，可另备持续开发场景，在实施前请求“继续本轮验收，只读核对现有增量的过度防御、外部输入校验和后续验证”。比较前后的工作树内容和 Git 差异，确认没有生成新的验证证据。
 
 评审者可以补跑相关检查，但应与被测 agent 自己执行的检查分别记录。既要看该做的工作是否完成，也要看是否发生越界写入、无理由扩大测试、额外审批或发布。需求存在合理多解，不要求代码、文档措辞或工具顺序相同。
 
