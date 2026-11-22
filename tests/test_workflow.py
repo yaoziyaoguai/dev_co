@@ -1,6 +1,7 @@
 """Behavioral tests for local evidence and host adapters; no external services."""
 from __future__ import annotations
 
+from codecs import BOM_UTF8
 import io
 import json
 import os
@@ -82,6 +83,44 @@ class EvidenceTests(ProjectFixture):
         self.assertEqual(subprocess.run(args, capture_output=True, timeout=10).returncode, 0)
         self.assertEqual(path.read_bytes(), first)
 
+    def test_adopt_state_preserves_bom_body_and_updates_only_requested_phase(self):
+        header, _, body = self.state.read_bytes()[4:].partition(b"\n---\n")
+        original = BOM_UTF8 + (b"---\n" + header + b"\n---\n" + body).replace(b"\n", b"\r\n")
+        self.state.write_bytes(original)
+        self.state.chmod(0o640)
+        self.assertEqual(workflow.locate_state(self.root), self.state)
+        previous, _ = workflow.load_state(self.state)
+        workflow.adopt_state(self.root, "docs/CURRENT.md")
+        self.assertEqual(self.state.read_bytes(), original)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS / "project_workflow.py"), "adopt-state", "--root", str(self.root),
+             "--state", "docs/CURRENT.md", "--phase", "build"],
+            capture_output=True, encoding="utf-8", timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(workflow.load_state(self.state)[0], {**previous, "phase": "build"})
+        updated = self.state.read_bytes()
+        self.assertTrue(updated.startswith(BOM_UTF8 + b"---\r\n"))
+        self.assertEqual(updated.partition(b"\r\n---\r\n")[2], body.replace(b"\n", b"\r\n"))
+        self.assertEqual(self.state.stat().st_mode & 0o777, 0o640)
+
+    def test_adopt_state_rejects_invalid_phase_and_yaml_without_writing(self):
+        path = self.root / "docs/NOTES.md"
+        body = "# 原文\r\n".encode("utf-8")
+        path.write_bytes(BOM_UTF8 + body)
+        with self.assertRaisesRegex(workflow.WorkflowError, "phase 无效"):
+            workflow.adopt_state(self.root, "docs/NOTES.md", "invalid")
+        self.assertEqual(path.read_bytes(), BOM_UTF8 + body)
+        workflow.adopt_state(self.root, "docs/NOTES.md")
+        self.assertEqual(workflow.load_state(path)[0]["phase"], "explore")
+        self.assertTrue(path.read_bytes().startswith(BOM_UTF8 + b"---\n"))
+        self.assertTrue(path.read_bytes().endswith(body))
+        foreign = BOM_UTF8 + b"---\r\ntitle: Notes\r\n---\r\n" + body
+        path.write_bytes(foreign)
+        with self.assertRaisesRegex(workflow.WorkflowError, "非 dev_co 格式"):
+            workflow.adopt_state(self.root, "docs/NOTES.md")
+        self.assertEqual(path.read_bytes(), foreign)
+
     def test_init_preserves_existing_work(self):
         before = self.state.read_bytes()
         with self.assertRaises(workflow.WorkflowError):
@@ -144,6 +183,16 @@ class EvidenceTests(ProjectFixture):
         log = self.root / report["checks"][0]["log"]
         self.assertIn("behavior passed", log.read_text(encoding="utf-8"))
         self.assertEqual(set(report["coverage"]), {"src/logic.py", "check.py"})
+
+    def test_evidence_comparison_requires_validated_intent_and_environment(self):
+        with self.assertRaisesRegex(KeyError, "goal_revision"):
+            workflow.intent({}, "body")
+        plan = workflow.verification_plan(self.meta)
+        current = workflow.snapshot(self.root, plan["inputs"], self.state)
+        meta = dict(self.meta)
+        del meta["environment"]
+        with self.assertRaisesRegex(KeyError, "environment"):
+            workflow.compare_evidence(self.root, meta, self.body, plan, {}, current)
 
     def test_failure_replaces_previous_success(self):
         self.assertTrue(self.verify()["ready"])
@@ -616,6 +665,37 @@ class EvidenceTests(ProjectFixture):
                 self.verify()
         lookup.assert_called_with(42_000, 0)
         self.assertTrue(lock.is_dir())
+
+    def test_verify_writes_owner_first_and_releases_lock_after_write_error(self):
+        self.assertTrue(self.verify()["ready"])
+        lock = self.root / ".project-workflow/verify.lock"
+        latest = workflow.evidence_path(self.root)
+
+        def fail_writing_owner(path, value):
+            self.assertEqual(path, lock / "owner.json")
+            self.assertFalse(latest.exists())
+            (lock / "owner.json.failed.tmp").touch()
+            raise workflow.WorkflowError("disk error")
+
+        with patch.object(workflow, "write_json", side_effect=fail_writing_owner):
+            with self.assertRaisesRegex(workflow.WorkflowError, "^disk error$"):
+                self.verify()
+        self.assertFalse(lock.exists())
+        self.assertFalse(self.gate()["ready"])
+
+    def test_verify_preserves_main_error_when_lock_cannot_be_removed(self):
+        lock = self.root / ".project-workflow/verify.lock"
+        other = lock / "external.txt"
+
+        def fail_with_external_file(*args):
+            other.touch()
+            raise workflow.WorkflowError("disk error")
+
+        with patch.object(workflow, "execute_check", side_effect=fail_with_external_file):
+            with self.assertRaisesRegex(workflow.WorkflowError, "^disk error$"):
+                self.verify()
+        self.assertTrue(other.is_file())
+        self.assertFalse(self.gate()["ready"])
 
     def test_explicit_log_retention_keeps_current_and_unfinished_runs(self):
         self.assertTrue(self.verify()["ready"])

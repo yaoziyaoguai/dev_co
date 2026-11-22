@@ -67,6 +67,19 @@ class HookRootTests(unittest.TestCase):
         self.assertNotIn("顶层项目目标", context)
         self.assertIn("项目：" + str(self.project), context)
 
+    def test_compact_brief_keeps_relative_subproject_changes(self):
+        subprocess.run(["git", "-C", str(self.repo), "config", "status.relativePaths", "false"], check=True)
+        subprocess.run(["git", "-C", str(self.project), "add", "--", "source.txt"], check=True)
+        for index in range(30):
+            (self.repo / f"aaa-unrelated-{index:02}.txt").touch()
+        (self.project / "only-local-change.py").touch()
+        summary = workflow.brief(self.project, self.state, compact=True)
+        self.assertIn("?? only-local-change.py", summary)
+        self.assertNotIn("aaa-unrelated", summary)
+        context = hooks.respond(self.event("SessionStart"))["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("?? only-local-change.py", context)
+        self.assertNotIn("aaa-unrelated", context)
+
     def test_default_discovers_nearest_state_and_falls_back_to_top_level(self):
         result = hooks.respond(self.event("SessionStart"))
         context = result["hookSpecificOutput"]["additionalContext"]
@@ -81,6 +94,32 @@ class HookRootTests(unittest.TestCase):
                 config = hooks.config(host, None, [])
                 command = config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
                 self.assertNotIn("--root", shlex.split(command))
+
+    def test_symlinked_docs_and_baseline_do_not_block_implicit_discovery(self):
+        self.state.unlink()
+        (self.project / "docs").rmdir()
+        (self.project / "docs").symlink_to(self.repo / "docs", target_is_directory=True)
+        (self.project / ".project-workflow").symlink_to(self.base, target_is_directory=True)
+        result = subprocess.run([sys.executable, str(SCRIPTS / "project_workflow.py"), "brief"], cwd=self.project,
+                                capture_output=True, encoding="utf-8", timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("项目：" + str(self.repo) + "\n", result.stdout)
+        context = hooks.respond(self.event("SessionStart"))["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("顶层项目目标", context)
+        self.assert_denied(hooks.respond(self.event("PreToolUse"), "docs/CURRENT.md", True, self.project))
+        self.top_state.unlink()
+        self.assertEqual(hooks.respond(self.event("SessionStart")), {})
+
+    def test_subproject_with_local_policy_is_not_hijacked_by_parent_state(self):
+        self.state.unlink()
+        nested = self.project / "src"
+        nested.mkdir()
+        (self.project / repository.POLICY).write_text(json.dumps({"schema": 1, "paths": {"src/": "source"}}),
+                                                     encoding="utf-8")
+        result = subprocess.run([sys.executable, str(SCRIPTS / "repository_check.py"), "check", "--scope", "work"],
+                                cwd=nested, capture_output=True, encoding="utf-8", timeout=10)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn(str(self.project / repository.BASELINE), json.loads(result.stderr)["error"])
 
     def test_cli_reports_current_root_when_invoked_below_project(self):
         self.state.unlink()
@@ -187,6 +226,7 @@ class HookRootTests(unittest.TestCase):
                 if root == self.project:
                     self.state.unlink()
                     (self.project / repository.BASELINE).unlink()
+                    (self.project / repository.POLICY).unlink()
 
     def test_default_root_keeps_the_boundary_of_a_partially_configured_subproject(self):
         policy = json.dumps({"schema": 1, "paths": {"docs/": "状态"}})

@@ -1,103 +1,42 @@
-# Research and Positioning
+# 调研与定位
 
-**按需读取：** 外部事实、数据可得性、需求或替代方案的未知会改变当前决定时使用。产出能支持下一步的证据与缺口；已有证据足够时停止，不把调研当固定阶段。
+**按需读取**　外部事实、数据可得性、需求或替代方案会改变当前决定时使用。已有充分证据时直接推进。
 
-章节导航：查事实 → `Start with prior work`、`Source hierarchy`、`Evidence ledger`；辨需求 → `Evidence appropriate to project intent`、`User-need and demand research`；比较外部采用/市场 → `Landscape analysis`；设计验证与收束 → `Online-first validation`、`Research stop condition`。按问题读取相关章节。
+章节导航：查事实 → `查找已有工作`、`来源优先级`、`证据记录`；辨需求 → `按项目目的找证据`、`用户需求`；比较采用与市场 → `比较现有替代方案`；设计验证与收束 → `先做小规模验证`、`停止调研的条件`。
 
-适用边界：区分事实、推断与假设，保留来源日期和反例。个人项目不强加市场验证；公开资料能回答时不用登录浏览器。桌面研究不代表真实用户验证。
+区分事实、推断和假设，保留来源日期、限制与反例。公开资料能回答时使用搜索或公共接口。桌面研究的结论限于它能观察的证据。
 
-## Start with prior work
+## 查找已有工作
 
-Search for recent research, practitioner reports, standards, public datasets, incumbent documentation, issue discussions, and failed attempts before reasoning from scratch. Prefer sources from the last 24 months in fast-moving areas such as AI, developer tooling, platforms, pricing, and regulation.
+查近期论文、实践报告、标准、公开数据、已有产品文档、问题讨论和失败尝试。AI、工具、平台、定价和监管等变化快的领域优先看最近两年，基础工作或历史对照可用旧资料。区分文章发布时间与数据实际采集时间。
 
-Use older work when it is foundational or when comparing how conditions changed. Record publication date and distinguish the date of the underlying data from the date of the article.
+## 来源优先级
 
-## Source hierarchy
+优先使用公开样本与方法的一手研究、官方标准和文档、公开数据及仓库记录。可信从业者的归纳可作补充，供应商宣传和个案要注明来源。搜索摘要只作查找线索。需要登录、动态界面或视觉证据且公共接口不足时再操作浏览器。
 
-Prefer, in order:
+## 证据记录
 
-1. primary research with disclosed sample and method;
-2. official standards, product documentation, pricing, filings, and platform policies;
-3. public datasets, repositories, changelogs, and issue trackers;
-4. credible analyst or practitioner synthesis;
-5. vendor claims and anecdotes, clearly labelled;
-6. search snippets only as discovery pointers, never final evidence.
+为影响决定的结论记录主张、来源和日期、样本或方法、能支持的判断、样本限制或利益关系、可信程度和冲突证据。遇到矛盾，核对用户、阶段、地区、渠道或定义是否不同。
 
-Use direct search or public endpoints by default. Do not open a personal browser merely to run ordinary searches. Browser automation is appropriate for authenticated, highly dynamic, or visual pages that cannot be inspected another way.
+## 按项目目的找证据
 
-## Evidence ledger
+- 商业产品观察实际付费、预算、紧迫性和切换行为。
+- 内部工具关注流程成本、发起方承诺、采用约束和组织影响。
+- 开源项目观察重复使用、生态缺口、维护意愿、贡献与集成。
+- 自用、学习或创作以实际使用和进展为依据。计划分发或商业化时才需要研究市场。
 
-For every load-bearing claim, capture:
+## 用户需求
 
-- claim;
-- source and date;
-- underlying sample or method when available;
-- what it actually supports;
-- limitations or incentives;
-- confidence: high, medium, or low;
-- whether another source conflicts with it.
+找付费、雇人、维护表格或脚本、返工与风险、重复请求和失败后的应对行为。商业项目明确首批能触达的用户、买家、预算负责人、采购触发条件、销售方式和现用替代品；其他项目按采用者、发起方、维护者或个人目标衡量。
 
-Do not average away conflicts. Explain whether sources studied different users, stages, regions, channels, or definitions.
+## 比较现有替代方案
 
-## Evidence appropriate to project intent
+对外采用、分发或商业化会影响决定时，分别核对同类功能有多少、目标用户实际采用多少、谁掌握数据和渠道，以及通用平台或人工服务能替代哪些环节。逐项比较面向谁、达成什么结果、如何操作、采用证据和切换成本。商业项目加上定价与采购方式。
 
-Do not force startup evidence onto every project:
+## 先做小规模验证
 
-- For a commercial product, look for consequential behavior, payment, budget, urgency, and switching.
-- For an internal tool, look for workflow cost, sponsor commitment, adoption constraints, and organizational consequences.
-- For open source, look for repeated use, ecosystem gaps, maintainership, contribution behavior, and integration demand.
-- For a personal, learning, or creative project, direct self-use, learning progress, or delight can be sufficient. Research the market only if distribution or commercialization is part of the goal.
+在大规模实施前选能回答当前未知的试验，如代表性任务或数据、技术小试验、内部并行试用、开源 RFC 或示例集成、商业项目的人工交付或明确付费提议。可观察真实操作、做前后对照或跨渠道重复。问卷和等候名单需要能承担后续行动的行为来佐证。
 
-## User-need and demand research
+## 停止调研的条件
 
-Look for behavior rather than interest:
-
-- money already spent when the project is commercial;
-- employees or agencies hired;
-- spreadsheets, scripts, and workarounds maintained;
-- delays, errors, lost revenue, compliance exposure, or career consequences;
-- repeated requests, expansion, or urgency;
-- what happens when the current solution fails.
-
-For commercial projects, market size does not substitute for a reachable first customer. Identify the user, buyer, budget owner, purchase trigger, sales motion, and current alternative. For other intents, replace those tests with the relevant adopter, sponsor, maintainer, or personal-success evidence above.
-
-## Landscape analysis
-
-Use this analysis when external adoption, distribution, or commercialization matters. Skip it for a personal or learning project whose success does not depend on a market.
-
-Map four different questions instead of treating “competition” as one number:
-
-1. **Feature saturation** — how many products offer similar functions?
-2. **Customer penetration** — how many target customers actually use or pay for them?
-3. **Control and capture** — who owns the data, discovery channel, workflow, and transaction?
-4. **Adjacent substitution** — can a platform, vertical suite, agency, spreadsheet, open-source tool, or internal team solve enough of the problem?
-
-For important alternatives, compare the intended user, outcome, workflow, distribution, evidence of adoption, switching cost, and gaps. Add pricing and purchasing behavior for commercial products. Do not dismiss an idea because somebody built it; do not infer demand merely because alternatives exist.
-
-## Online-first validation
-
-Before building a substantial production system, prefer tests appropriate to the project intent, such as:
-
-- a small workflow or technical spike using representative data;
-- realistic query, task, or fixture sets;
-- an internal shadow trial for an internal tool;
-- an RFC, sample integration, or maintainer test for open source;
-- concierge delivery, a concrete landing-page offer, or paid design partners for a commercial product;
-- remote observation of real users completing the job;
-- holdouts or before/after comparisons;
-- repeated tests across channels rather than one favorable output.
-
-Surveys and waitlists are weak unless paired with consequential behavior.
-
-## Research stop condition
-
-Stop desk research when the largest uncertainty requires private data, real workflow observation, consequential adoption, payment for a commercial product, integration access, or longitudinal behavior. Convert it into a field test with a threshold.
-
-The research output should state, when applicable:
-
-- supported facts;
-- best current interpretation;
-- unresolved hypotheses;
-- recommended smallest coherent scope;
-- strongest counterargument;
-- next test and, when meaningful, its stop or change threshold.
+当最大未知只能通过私有数据、真实工作流、实际采用、付费、集成权限或长期使用解决时，停止桌面研究并设计有阈值的现场验证。记录已掌握的事实、当前解释、最强反例、未决假设、建议的最小范围和下一次验证的通过或改变方向条件。

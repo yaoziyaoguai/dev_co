@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -123,6 +124,34 @@ class RepositoryTests(unittest.TestCase):
                          [["README.md", "app/(dashboard)/page.md"], ["README.md", "docs/guide(v2).md"]])
         self.assertFalse(self.check()["ready"])
 
+    def test_anchor_check_is_opt_in_and_checks_new_local_fragments(self):
+        for option in ({}, {"check_anchors": False}, {"check_anchors": True}):
+            with self.subTest(option=option):
+                self.policy.pop("check_anchors", None)
+                self.policy.update(option)
+                (self.root / repository.BASELINE).unlink(missing_ok=True)
+                self.write("README.md", '# Run\n<a id="legacy"></a>\n[Available](#legacy)\n'
+                           "[Existing broken anchor](docs/current.md#old)\n")
+                result = self.adopt()
+                enabled = option == {"check_anchors": True}
+                self.assertEqual(result["existing_broken_links"], int(enabled))
+                self.assertFalse(self.check()["policy_changed"])
+                self.write("README.md", '# Run\n[Same page](#run) [Missing](#new)\n'
+                           "[Cross document](docs/current.md#missing) [Existing](docs/current.md#old)\n")
+                errors = self.check()["errors"]
+                self.assertEqual(errors, [
+                    "新增失效引用：README.md → #new",
+                    "新增失效引用：README.md → docs/current.md#missing",
+                ] if enabled else [])
+
+    def test_anchor_check_rejects_non_boolean_config(self):
+        for value in (0, "false", None, []):
+            with self.subTest(value=value):
+                self.policy["check_anchors"] = value
+                with self.assertRaisesRegex(workflow.WorkflowError, "check_anchors 必须为布尔值"):
+                    self.adopt()
+                self.assertFalse((self.root / repository.BASELINE).exists())
+
     def test_unresolvable_symlink_is_reported_as_broken_link(self):
         self.adopt()
         self.write("README.md", "[Reference](docs/current-link.md)\n")
@@ -216,6 +245,20 @@ class RepositoryTests(unittest.TestCase):
         self.assertTrue(repository.check(self.root, custom, scope="work")["ready"])
         self.assertEqual((self.root / "docs/current.md").read_bytes(), original)
 
+    def test_missing_policy_reports_resolved_root_and_relative_path_in_ascii_locale(self):
+        policy = "./中文规则.json"
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS / "repository_check.py"), "check", "--scope", "work",
+             "--policy", policy.encode("utf-8")],
+            cwd=self.root, capture_output=True, encoding="utf-8", timeout=10,
+            env=dict(os.environ, LC_ALL="C", PYTHONUTF8="0", PYTHONCOERCECLOCALE="0"),
+        )
+        self.assertEqual(result.returncode, 2, result.stdout)
+        message = json.loads(result.stderr)["error"]
+        self.assertIn("当前项目根为 " + str(self.root), message)
+        self.assertIn(policy, message)
+        self.assertIn("--root", message)
+
     def test_library_and_cli_share_baselines_for_a_root_alias(self):
         with tempfile.TemporaryDirectory() as location:
             alias = Path(location) / "alias"
@@ -239,6 +282,36 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual((archive / "repository-baseline.json").read_bytes(), original)
         self.assertEqual((archive / "repository-reviews.json").read_bytes(), reviews)
         self.assertTrue(repository.check(self.root, scope="next")["ready"])
+
+    def test_scope_switch_keeps_ordered_archives_and_reminds_about_state(self):
+        state = workflow.initialize(self.root, "CURRENT.md", "当前工作线")
+        meta, body = workflow.load_state(state)
+        meta["verification"].update(repository_policy=repository.POLICY, repository_scope="work")
+        state.write_text("---\n" + json.dumps(meta, ensure_ascii=False) + "\n---\n" + body, encoding="utf-8")
+        before = state.read_bytes()
+        self.adopt()
+        command = [sys.executable, str(SCRIPTS / "repository_check.py"), "switch-scope",
+                   "--root", str(self.root), "--scope", "work", "--next-scope", "next/release"]
+        switched = subprocess.run(command, capture_output=True, encoding="utf-8", timeout=10)
+        self.assertEqual(switched.returncode, 0, switched.stderr)
+        self.assertIn("CURRENT.md 中的 verification.repository_scope 更新为 next/release", switched.stdout)
+        first, = (self.root / ".project-workflow/archive").iterdir()
+        second = repository.switch_scope(self.root, repository.POLICY, "next/release", "last")
+        self.assertEqual(second["warnings"], [])
+        second_path = Path(second["archive"])
+        self.assertRegex(first.name, r"^\d{8}T\d{6}\.\d{6}Z-work-[0-9a-f]{8}$")
+        self.assertRegex(second_path.name, r"^\d{8}T\d{6}\.\d{6}Z-next_release-[0-9a-f]{8}$")
+        self.assertLess(first.name, second_path.name)
+        self.assertEqual(state.read_bytes(), before)
+
+    def test_scope_switch_reports_invalid_optional_state_without_changing_it(self):
+        self.write("CURRENT.md", '---\n{"workflow":"dev_co",\n---\n原正文\n')
+        before = (self.root / "CURRENT.md").read_bytes()
+        self.adopt()
+        result = repository.switch_scope(self.root, repository.POLICY, "work", "next")
+        self.assertTrue(result["ready"])
+        self.assertIn("frontmatter JSON 无效", result["warnings"][0])
+        self.assertEqual((self.root / "CURRENT.md").read_bytes(), before)
 
     def test_checkpoint_does_not_revive_a_review_when_content_returns(self):
         self.adopt()

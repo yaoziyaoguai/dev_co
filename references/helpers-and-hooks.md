@@ -18,7 +18,7 @@ Python 3.10+ 标准库，支持 macOS/Linux 的本地进程管理。命令中的
 python3 "$SKILL_ROOT/scripts/project_workflow.py" init --root "$PROJECT_ROOT" --goal "本轮要交付的结果"
 ```
 
-`init` 默认创建 `docs/CURRENT.md`。已有普通 Markdown 可用 `adopt-state` 接入，命令保留原文字节和权限。已有可用状态头的记录可直接复用，其他 frontmatter 格式仍按原格式维护或手工接入。
+`init` 默认创建 `docs/CURRENT.md`。已有普通 Markdown 可用 `adopt-state` 接入，保留正文字节、UTF-8 BOM 和权限。已有合法状态头时，只有显式传入 `--phase` 才会更新阶段。其他 frontmatter 格式可沿用原格式或手工接入。
 
 ```sh
 python3 "$SKILL_ROOT/scripts/project_workflow.py" adopt-state --root "$PROJECT_ROOT" --state docs/PROJECT.md --phase build
@@ -57,7 +57,7 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" adopt-state --root "$PROJECT_R
 
 命令和路径只是示例，使用项目真实可运行的检查；缺少文件即失败。`phase` 为 explore/shape/build/repair/recover/deliver，`status` 为 active/needs-user/blocked/paused/ready/done。`verification.level` 为 none/targeted/integration/release。无自动检查时 checks/inputs 留空并记录实际人工验收，不为凑数编造检查。
 
-自动探测按 JSON frontmatter 的 `workflow` 标记识别 `docs/CURRENT.md`、`docs/PROJECT.md`、`CURRENT.md`。普通文档可继续人工维护。自定义路径要在项目入口和 Hook 配置中保持一致。状态与证据文件以 UTF-8 读写。所有状态、证据和声明输入必须在项目根目录内，状态和证据路径不能经过符号链接。把生成的 `.project-workflow/` 加入适用的忽略规则前先检查现有约定。原始日志可能含项目信息，提交或上传须按当前授权处理。
+自动探测按 JSON frontmatter 的 `workflow` 标记识别 `docs/CURRENT.md`、`docs/PROJECT.md`、`CURRENT.md`，跳过经由符号链接的候选。普通文档可继续人工维护。自定义路径要在项目入口和 Hook 配置中保持一致。状态与证据文件以 UTF-8 读写。所有状态、证据和声明输入必须在项目根目录内，显式指定的状态和证据路径同样不得经过符号链接。把生成的 `.project-workflow/` 加入适用的忽略规则前先检查现有约定。原始日志可能含项目信息，提交或上传须按当前授权处理。
 
 可选字段：`brief_sections` 在 frontmatter 顶层指定现有二级章节的实际标题列表；默认选择本轮目标、验收标准、项目约束、当前决定、代码导航、推进约定、最近验证、下一步。它只决定恢复摘要，不决定意图指纹的排除范围。需要自定义进展标题时使用下述 `non_intent_sections`。
 
@@ -82,7 +82,7 @@ python3 "$SKILL_ROOT/scripts/project_workflow.py" verify --reuse --root "$PROJEC
 python3 "$SKILL_ROOT/scripts/project_workflow.py" gate --root "$PROJECT_ROOT"
 ```
 
-`brief` 默认返回无章节歧义的短记录全文。配置 `brief_sections` 后，短记录也按指定章节提取。提取时保留正文位置，报告截断、缺项和恢复章节同名歧义，并列出其他章节导航。按本轮问题补读相应缺口。新会话或上下文丢失时恢复一次即可。
+`brief` 默认返回无章节歧义的短记录全文。配置 `brief_sections` 后，短记录也按指定章节提取。提取时保留正文位置，报告截断、缺项和恢复章节同名歧义，并列出其他章节导航。工作树摘要只显示当前项目根内的相对路径。按本轮问题补读相应缺口。新会话或上下文丢失时恢复一次即可。
 
 `verify --reuse` 核对功能证据；有效时返回 `reused: true`，不运行测试、不重写日志。证据失效才执行声明的 argv 并记录结果；确有重测需要时省略 `--reuse`。执行前检查配置、输入边界和仓库基线来源，非法时不启动检查；普通资料更新、归属或引用待补不会阻止功能检查。命令不启用 shell 字符串，保留子检查退出码、超时、日志和输入指纹。
 

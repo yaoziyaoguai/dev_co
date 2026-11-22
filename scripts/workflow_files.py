@@ -20,6 +20,10 @@ class WorkflowError(Exception):
     pass
 
 
+class SymlinkPathError(WorkflowError):
+    pass
+
+
 def utf8_bytes(value: str) -> bytes:
     try:
         return value.encode("utf-8")
@@ -51,14 +55,24 @@ def safe_path(root: Path, relative: str, *, no_symlinks: bool = False, preserve_
         for part in path.parts[:-1] if preserve_leaf else path.parts:
             current = current / part
             if current.is_symlink():
-                raise WorkflowError("状态和证据路径不得经过符号链接：" + relative)
+                raise SymlinkPathError("状态和证据路径不得经过符号链接：" + relative)
     resolved = (root / path.parent).resolve() / path.name if preserve_leaf and path.parts else (root / path).resolve()
     if not resolved.is_relative_to(root.resolve()):
         raise WorkflowError("路径或符号链接越过项目边界：" + relative)
     return resolved
 
-def read_text(path: Path, limit: int = 128_000) -> str:
-    with path.open(encoding="utf-8") as source:
+
+def project_marker(root: Path, name: str) -> Path | None:
+    """自动寻根只读取真实的项目入口，不沿共享文档链接查找。"""
+    try:
+        path = safe_path(root, name, no_symlinks=True)
+    except SymlinkPathError:
+        return None
+    return path if path.is_file() else None
+
+
+def read_text(path: Path, limit: int = 128_000, *, encoding: str = "utf-8") -> str:
+    with path.open(encoding=encoding) as source:
         value = source.read(limit + 1)
     if len(value) > limit:
         raise WorkflowError("文件过大：" + str(path))
@@ -116,10 +130,11 @@ def git_file_names(root: Path, paths: list[str]) -> list[str] | None:
         raise WorkflowError("Git 输入枚举失败：" + str(error)) from error
     if result.returncode != 0:
         raise WorkflowError("Git 输入枚举失败：" + result.stderr.decode(errors="replace").strip())
-    return sorted({path_text(name) for name in result.stdout.split(b"\0") if name})
+    return sorted({path_text(name).rstrip("/") for name in result.stdout.split(b"\0") if name})
 
 
 def gitlink_fingerprint(root: Path, name: str) -> dict | None:
+    directory = root / filesystem_path(name)
     index = git_value(root, "ls-files", "--stage", "-z", "--", utf8_bytes(":(literal)" + name)) or ""
     for item in index.split("\0"):
         fields, _, path = item.partition("\t")
@@ -127,10 +142,9 @@ def gitlink_fingerprint(root: Path, name: str) -> dict | None:
             continue
         mode, commit, stage = fields.split()
         if mode != "160000":
-            return None
+            break
         if stage != "0":
             raise WorkflowError("子模块 Git 索引有冲突：" + name)
-        directory = root / filesystem_path(name)
         if not (directory / ".git").exists():
             if any(directory.iterdir()):
                 raise WorkflowError("未初始化的子模块目录含文件：" + name)
@@ -142,6 +156,8 @@ def gitlink_fingerprint(root: Path, name: str) -> dict | None:
         if status:
             raise WorkflowError("已声明的子模块有未提交的变化：" + name)
         return {"type": "gitlink", "index": commit, "checkout": head}
+    if os.path.lexists(directory / ".git"):
+        raise WorkflowError(f"发现未注册为子模块的嵌套 Git 工作树：{name}；请加入 .gitignore 或验证 exclude，或注册为子模块。")
     return None
 
 

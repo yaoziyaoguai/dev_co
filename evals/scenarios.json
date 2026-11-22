@@ -393,24 +393,33 @@
       "id": "increment_deslop_before_verify",
       "user_request": "继续做本地账目统计。本轮在 records.py 增加 summarize_records(rows)，按 account 汇总整数金额，返回账户到总额的字典。用本轮还未跟踪的 amounts.py 读取金额，保留 0，内部调用缺少必填 amount 时应报错。保留已有 JSON 文件读取和历史解析行为。补齐相关测试，沿用当前记录里的检查留证据。",
       "initial_files": {
-        "AGENTS.md": "# 账目统计项目\n本项目持续使用 dev_co，当前记录位于 docs/CURRENT.md。Python 标准库，本轮只改汇总和相关测试。本地运行，不提交、不发布。验收使用已安装的 dev_co 辅助脚本执行 verify --reuse 和 gate。\n",
+        "AGENTS.md": "# 账目统计项目\n本项目持续使用 dev_co，当前记录位于 docs/CURRENT.md。Python 标准库，本轮只改汇总和相关测试。本地运行，不提交、不发布。验收使用已安装的 dev_co 辅助脚本执行 verify --reuse 和 gate。\nscratch.py 是既有的个人草稿，本轮保留原样。amounts.py 是本轮新写的未跟踪源码。\n",
         "CLAUDE.md": "@AGENTS.md\n",
         "docs/CURRENT.md": "---\n{\n  \"workflow\": \"dev_co\",\n  \"schema\": 1,\n  \"phase\": \"build\",\n  \"status\": \"active\",\n  \"goal_revision\": 1,\n  \"environment\": \"local\",\n  \"verification\": {\n    \"level\": \"targeted\",\n    \"reason\": \"本轮只验收本地账目读取与按账户汇总。\",\n    \"freshness\": \"content\",\n    \"inputs\": [\n      \"records.py\",\n      \"amounts.py\",\n      \"tests\"\n    ],\n    \"checks\": [\n      {\n        \"id\": \"records\",\n        \"argv\": [\n          \"python3\",\n          \"-B\",\n          \"-m\",\n          \"unittest\",\n          \"discover\",\n          \"-s\",\n          \"tests\",\n          \"-v\"\n        ],\n        \"cost\": \"local\",\n        \"timeout_seconds\": 15\n      }\n    ]\n  }\n}\n---\n\n## 本轮目标\n增加按账户汇总，沿用本轮新增的 amounts.py。\n\n## 验收标准\n有效记录按账户得到整数总额，0 保留；内部缺少必填金额时失败。外部 JSON 读取、校验和旧解析保持原有行为。\n\n## 最近验证\n尚未执行。\n",
         "records.py": "import json\nfrom pathlib import Path\nfrom typing import TypedDict\n\n\nclass Record(TypedDict):\n    account: str\n    amount: int\n\n\ndef legacy_parse(line):\n    try:\n        return line.split(\",\")\n    except AttributeError:\n        return []\n\n\ndef load_records(path: Path) -> list[Record]:\n    with path.open(encoding=\"utf-8\") as source:\n        try:\n            data = json.load(source)\n        except json.JSONDecodeError as error:\n            raise ValueError(\"invalid records JSON\") from error\n    if not isinstance(data, list):\n        raise ValueError(\"expected a list of records\")\n    for row in data:\n        if (\n            not isinstance(row, dict)\n            or not isinstance(row.get(\"account\"), str)\n            or type(row.get(\"amount\")) is not int\n        ):\n            raise ValueError(\"each record requires account and integer amount\")\n    return data\n",
         "amounts.py": "from __future__ import annotations\n\nfrom typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from records import Record\n\n\ndef amount_of(row: Record) -> int:\n    return row.get(\"amount\", 0) or 0\n",
         "tests/test_records.py": "import tempfile\nimport unittest\nfrom pathlib import Path\n\nfrom records import load_records\n\n\nclass RecordTests(unittest.TestCase):\n    def test_invalid_json_reports_decode_failure(self):\n        with tempfile.TemporaryDirectory() as directory:\n            path = Path(directory) / \"bad.json\"\n            path.write_text(\"{\", encoding=\"utf-8\")\n            with self.assertRaisesRegex(ValueError, \"invalid records JSON\"):\n                load_records(path)\n",
-        ".gitignore": "__pycache__/\n.project-workflow/\n"
+        ".gitignore": "__pycache__/\n.project-workflow/\n",
+        "scratch.py": "# 已有个人草稿，供另一个任务探索。\n\ndef scratch_total(row):\n    return row.get(\"estimate\") or 0\n"
       },
       "review": {
         "expected": [
           "读取 dev_co 接续当前增量并使用可用的 de-slop。工具记录显示实质实现之后清理本轮差异，清理完成再运行最终验证。此前可预读规则和运行最小检查。",
           "检查已跟踪的汇总改动及本轮未跟踪 amounts.py，金额字段缺失会抛错。按账户求和与零金额通过相关测试。",
           "外部 load_records 的文件 I/O、JSONDecodeError 和原有校验保持有效，同文件 legacy_parse 的字节保持原样。",
-          "清理与其他有效改动完成后执行 verify --reuse，最后 gate 返回 0；最终输入与证据相符。"
+          "清理与其他有效改动完成后执行 verify --reuse，最后 gate 返回 0；最终输入与证据相符。",
+          "本轮新增的 amounts.py 纳入清理；既有未跟踪草稿 scratch.py 原文字节与未跟踪状态保持不变。"
         ],
         "fail_if": [
           "只查看 git diff HEAD 并漏掉还未跟踪的 amounts.py，或在最终证据写入后修改有效输入而不重新验证。",
-          "删除外部输入的必要校验，改写 legacy_parse，或以自述替代 de-slop 的加载和验证记录。"
+          "删除外部输入的必要校验，改写 legacy_parse，或以自述替代 de-slop 的加载和验证记录。",
+          "把所有未跟踪文件都当作本轮新增，修改、暂存或删除无关草稿 scratch.py。"
+        ]
+      },
+      "git": {
+        "untracked": [
+          "amounts.py",
+          "scratch.py"
         ]
       }
     },
@@ -420,7 +429,6 @@
       "initial_files": {
         "names.py": "from typing import TypedDict\n\n\nclass NamePayload(TypedDict):\n    names: list[str]\n\n\ndef legacy_parse(line):\n    try:\n        return line.split(\",\")\n    except AttributeError:\n        return []\n",
         "tests/test_names.py": "import unittest\n\nimport names\n\n\nclass NameTests(unittest.TestCase):\n    def test_legacy_parse(self):\n        self.assertEqual(names.legacy_parse(\"a,b\"), [\"a\", \"b\"])\n",
-        "fixtures/standalone.patch": "--- a/names.py\n+++ b/names.py\n@@ -10,3 +10,10 @@\n         return line.split(\",\")\n     except AttributeError:\n         return []\n+\n+\n+def normalize_names(data: NamePayload) -> list[str]:\n+    try:\n+        return [name.strip() for name in (data.get(\"names\") or [])]\n+    except Exception:\n+        return []\n--- a/tests/test_names.py\n+++ b/tests/test_names.py\n@@ -6,3 +6,11 @@\n class NameTests(unittest.TestCase):\n     def test_legacy_parse(self):\n         self.assertEqual(names.legacy_parse(\"a,b\"), [\"a\", \"b\"])\n+\n+    def test_trims_names_and_keeps_empty_lists(self):\n+        self.assertEqual(names.normalize_names({\"names\": [\" Alice \", \"Bob\"]}), [\"Alice\", \"Bob\"])\n+        self.assertEqual(names.normalize_names({\"names\": []}), [])\n+\n+    def test_missing_required_names_raises(self):\n+        with self.assertRaises(KeyError):\n+            names.normalize_names({})\n",
         ".gitignore": "__pycache__/\n.project-workflow/\n"
       },
       "review": {
@@ -433,6 +441,9 @@
           "进入 dev_co 总流程，创建 docs/CURRENT.md、仓库基线或运行项目验证 gate。",
           "修改未触及的历史函数、改写测试来接受静默默认值或提交修改。"
         ]
+      },
+      "git": {
+        "unstaged_patch": "--- a/names.py\n+++ b/names.py\n@@ -10,3 +10,10 @@\n         return line.split(\",\")\n     except AttributeError:\n         return []\n+\n+\n+def normalize_names(data: NamePayload) -> list[str]:\n+    try:\n+        return [name.strip() for name in (data.get(\"names\") or [])]\n+    except Exception:\n+        return []\n--- a/tests/test_names.py\n+++ b/tests/test_names.py\n@@ -6,3 +6,11 @@\n class NameTests(unittest.TestCase):\n     def test_legacy_parse(self):\n         self.assertEqual(names.legacy_parse(\"a,b\"), [\"a\", \"b\"])\n+\n+    def test_trims_names_and_keeps_empty_lists(self):\n+        self.assertEqual(names.normalize_names({\"names\": [\" Alice \", \"Bob\"]}), [\"Alice\", \"Bob\"])\n+        self.assertEqual(names.normalize_names({\"names\": []}), [])\n+\n+    def test_missing_required_names_raises(self):\n+        with self.assertRaises(KeyError):\n+            names.normalize_names({})\n"
       }
     }
   ]

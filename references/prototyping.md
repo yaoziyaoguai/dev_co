@@ -1,110 +1,47 @@
-# Prototypes and Focused Trials
+# 原型与小试验
 
-**按需读取：** 交互、产品形态或技术可行性的未知会影响当前决定时，才单独做原型；采用行为按需选择观察或小试验。产出回答当前问题的证据和决定，已有合适证据先复用。
+**按需读取**　交互、产品形态或技术可行性的未知会改变当前决定时使用。已有适用证据先复用。
 
-章节导航：产品形态或交互未知 → `Product-shape evidence`；选载体 → `Select by uncertainty`；所有试验 → `Prototype contract`、`Exit`；具体执行只读选中的 `Figma and FigJam`、`Disposable interactive prototype`、`Technical spike` 或 `Observation`。
+章节导航：判断是否需要 → `原型要回答的问题`；选方式 → `按未知选择载体`；所有试验 → `试验约定`、`收束试验`；执行时按需读 `Figma 与 FigJam`、`一次性交互原型`、`技术试验`、`观察用户`。
 
-适用边界：讨论不授权创建外部设计或启动实施。mock 不证明真实集成，静态界面不证明交互；系统/CLI 按所需证据选技术试验。只可直接删除本任务在隔离临时目录创建的可抛弃产物，其余保留/归档或按授权处理；复用原型代码须按生产代码重新审视。
+讨论本身不授权创建外部设计或启动实施。只可直接删除本任务在隔离临时目录创建的一次性产物；其他产物保留、归档或按授权处理。
 
-## Product-shape evidence
+## 原型要回答的问题
 
-Create a separate prototype only when an unresolved interaction, product-form, or feasibility question could change the current decision. For a simple, settled workflow, the first real implementation slice may supply the evidence; no disposable copy is required.
+明确哪条答案会改变决定。已确定的简单流程可从第一段真实实现取证。选择成本最低而有代表性的载体，走完最短核心任务，纳入影响决定的空、加载、部分成功、失败、恢复或成功态。样本要体现实际名称、密度、关系和难例。涉及层级、操作优先级和 UI 状态时，按[界面设计与验证](ui-design.md)核对受影响的表面。
 
-Use the cheapest representative surface that answers the question. Walk the smallest coherent core journey, covering only the empty, loading, partial, error, recovery, and success states that could change the decision. A complete design system or every screen is not required.
+## 按未知选择载体
 
-A static screen or diagram cannot prove interaction; use a runnable task when behavior is the unknown. Mock data must expose realistic labels, content density, relationships, and awkward cases. Inspect and reuse an existing suitable design or demo instead of recreating it.
+| 当前未知 | 优先采用 | 证据范围 |
+| --- | --- | --- |
+| 服务分工、角色和顺序 | FigJam 或流程图 | 流程和交接 |
+| 信息层级、布局、产品形态 | 足够表达问题的 Figma 页面 | 视觉结构 |
+| 交互、状态切换、任务完成 | 可运行的一次性原型 | 代表性任务行为 |
+| 原生 API、媒体、模型质量、同步或性能 | 单项技术试验 | 指定环境的可行性 |
+| 是否会采用 | 人工交付或真实任务观察，商业假设可加付费提议 | 对应用户的实际行动 |
 
-When hierarchy, action priority, density, or UI states are part of that question, use the relevant sections of [UI design and verification](ui-design.md). Keep settled brand and interaction decisions; the guidance does not itself require a separate prototype.
+采用当前会话可用的载体。缺 Figma 时按问题选现有演示、浏览器原型或流程图。宿主无法运行交互时，记录做过的源码或契约检查及仍需运行的任务。一个产物无法回答各自的问题时，再拆开试验。
 
-## Select by uncertainty
+## 试验约定
 
-| Uncertainty | Best first artifact | What it cannot prove |
-|---|---|---|
-| Service blueprint, ownership, or sequence | FigJam or flow diagram | Visual usability or technical feasibility |
-| Information hierarchy, layout, and product form | Figma screens at the lowest sufficient fidelity | Real behavior, performance, or integration |
-| Interaction, state transitions, and task completion | Disposable interactive prototype on a representative surface | Production architecture |
-| Native APIs, media, model quality, synchronization, or performance | Focused technical spike | Whether users value the workflow |
-| Adoption or demand | Concierge/manual test; include a paid offer only for a commercial hypothesis | Product scalability |
+快速探索记录问题、假设、真实场景和决定。正式验证还要写明参与者或环境、代表性数据、观察指标、通过与失败及不确定的阈值、时间上限和产物去向。核心问题尚说不清时先明确决定缺口。
 
-Choose from the capabilities available to the current session. When Figma is unavailable, use an existing demo, a runnable browser prototype, or a flow diagram as appropriate to the decision. When the host cannot run the interaction, record the source or contract checks performed and the user tasks that still need runtime verification.
+## Figma 与 FigJam
 
-Split trials only when one artifact cannot answer the distinct questions. A polished mockup can conceal an impossible technical core; a successful technical demo can conceal an unwanted product.
+FigJam 适合流程、系统和协作。Figma 从流程和简单组件开始，只有品牌表达、密度、跨平台约束或视觉信任会影响决定时，才增加保真度。先找已有设计系统，覆盖核心任务和相关状态，验证页面与导航。选择 Figma 且能力可用时，创建或更新可编辑产物。有实现授权时再用设计到代码工具。静态画面只能证明可见结构，交互、可访问行为、集成与性能各需运行证据。
 
-## Prototype contract
+## 一次性交互原型
 
-For a quick design exploration, record only the question, hypothesis, realistic scenario, and decision. For a formal user or technical validation, also record:
+选择代表性运行表面，通常用 mock 和内存状态，保留一个可运行命令或入口及清楚的原型标记。只做当前任务需要的状态，执行核心路径并记录结果。保留前先决定归档或复用。复用原型代码时按生产代码审视边界、移除 mock 前提并补相关测试。
 
-- question being tested;
-- current hypothesis;
-- target participant or environment;
-- realistic scenario and representative mock data;
-- behavior or measurement to observe;
-- pass, fail, and inconclusive thresholds;
-- maximum time or scope;
-- what will be retained, archived, reused, or proposed for deletion afterward.
+## 技术试验
 
-Keep this proportional. If the core question cannot be stated, the prototype is probably premature.
+隔离一个风险，如延迟、数据质量、权限、API 限速或离线运行。用代表性数据测量，记录环境、输入、输出、失败情况和结论适用范围。无需搭建完整应用。
 
-## Figma and FigJam
+## 观察用户
 
-When visual hierarchy or product form is materially uncertain and editable screens are the cheapest useful test, use the lowest sufficient fidelity in Figma:
+让参与者独立尝试真实任务，关注停顿、误解、跳过、越出原型能力的动作、预期结果和是否愿意采取下一步。用完成任务、行为改变、提供数据、持续采用或适用的付费衡量假设。
 
-1. FigJam is useful primarily for flows, systems, or collaborative mapping.
-2. Start with flows, wireframes, or simple components. Increase fidelity only when visual trust, content density, brand expression, or platform conventions are part of the decision.
-3. Inspect an existing design system before creating new primitives.
-4. Cover the core journey and only the states needed to resolve the named uncertainty.
-5. Validate the screens and navigation. A visually attractive static screen without a testable task does not prove interaction; use a runnable demo when behavior or state is at issue.
-6. Use design-to-code or Code Connect when the relevant design decisions are settled and implementation is within current authorization.
+## 收束试验
 
-Do not claim that Figma proves runtime behavior, complex gestures or shortcuts, accessibility behavior, integration reliability, model latency, or native performance.
-
-When Figma is selected and the capability is available, create or update an actual editable Figma artifact; a prose-only screen description does not satisfy that visual test.
-
-## Disposable interactive prototype
-
-Use a disposable interactive prototype when a material interaction question needs runnable evidence before implementation. Choose a representative surface, often a browser; native interaction may require a native shell or focused spike. Keep it intentionally disposable:
-
-- mock data and in-memory state by default;
-- no production authentication, database, billing, or generalized architecture;
-- one command or URL to run;
-- only the core journey and states needed for the question;
-- representative mock records, realistic labels, and realistic content density rather than lorem ipsum;
-- visible prototype marker;
-- after the decision, record what is retained, archived, or intentionally reused without letting it silently become production architecture.
-
-Run the demo and verify the core journey. Source code or screenshots without a successful representative task do not prove interaction.
-
-The agent may delete without further authorization only disposable artifacts it created inside an isolated temporary directory. Mark or archive every other prototype by default; deleting a user-provided, pre-existing, or project-stored prototype requires explicit authorization.
-
-Reusing prototype code is a production-code decision, not a shortcut. Review every retained part against the accepted architecture, remove mock-only assumptions and dependencies, and add the relevant production tests. Otherwise carry forward only the validated product decisions, fixtures, and visual assets.
-
-## Technical spike
-
-Isolate one feasibility risk. Examples include model-output quality, runtime performance, synchronization, platform permissions, API rate limits, and offline operation.
-
-Use representative data and measure the result. Avoid wrapping the spike in a full application. Record environment, input, output, failure cases, and whether the result generalizes.
-
-## Observation
-
-Prefer watching a participant attempt a realistic task without coaching. Record:
-
-- where they hesitate;
-- what they misunderstand;
-- what they ignore;
-- what they try that the prototype does not support;
-- what result they expect;
-- whether they would take a consequential next step.
-
-Compliments do not validate a hypothesis. Task completion, changed behavior, data access, sustained adoption, a concrete commitment, or payment when commercial intent is being tested is stronger evidence.
-
-## Exit
-
-End with one of:
-
-- hypothesis supported; carry the decision into the product record;
-- hypothesis rejected; change or stop;
-- inconclusive; name the missing evidence and design a smaller follow-up;
-- technical feasibility proven but demand unproven;
-- product workflow validated but technical feasibility unproven.
-
-Record whether the prototype will be retained, archived, reused, or proposed for deletion. Preserve the answer, not the accidental scaffolding, and follow the deletion boundary above.
+写下假设得到支持、被否定或证据不足的结论，更新当前决定，或指定更小的后续验证。技术可行性和需求采用各记录证据。按约定保留、归档或提出删除试验产物。

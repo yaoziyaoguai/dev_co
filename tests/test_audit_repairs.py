@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -13,6 +14,18 @@ import repository_check as repository
 
 
 class InputCoverageTests(ProjectFixture):
+    def test_unregistered_nested_git_worktree_is_reported_and_can_be_excluded(self):
+        nested = self.root / "src/nested_repo"
+        for root in (self.root, nested):
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+        with self.assertRaisesRegex(workflow.WorkflowError, "未注册为子模块.*src/nested_repo"):
+            self.verify()
+        with self.assertRaisesRegex(workflow.WorkflowError, "未注册为子模块.*src/nested_repo"):
+            repository.fingerprints(self.root, ["src/nested_repo"])
+        self.meta["verification"]["exclude"] = ["src/nested_repo/"]
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+
     def test_gitlink_with_uninitialized_and_clean_checkout(self):
         module = self.base / "module"
         module.mkdir()
@@ -68,7 +81,14 @@ class InputCoverageTests(ProjectFixture):
         entry.write_text("#!/bin/sh\n[ -s src/logic.py ]\n", encoding="utf-8")
         entry.chmod(0o755)
         self.meta["verification"]["inputs"].append("check.sh")
-        self.meta["verification"]["checks"][0]["argv"] = ["./check.sh"]
+        try:
+            subprocess.run([str(entry)], cwd=self.root, capture_output=True, check=True, timeout=5)
+            argv = ["./check.sh"]
+        except PermissionError:
+            argv = [sys.executable, "-c", "from pathlib import Path; import sys; "
+                    "sys.exit(0 if (Path('check.sh').stat().st_mode & 0o111) "
+                    "and Path('src/logic.py').stat().st_size > 0 else 1)"]
+        self.meta["verification"]["checks"][0]["argv"] = argv
         self.save()
         self.assertTrue(self.verify()["ready"])
         entry.chmod(0o644)
@@ -76,6 +96,18 @@ class InputCoverageTests(ProjectFixture):
         self.assertFalse(workflow.verify(self.root, self.state, reuse=True)["ready"])
         entry.chmod(0o755)
         self.assertTrue(self.verify()["ready"])
+
+    def test_execution_permission_error_mentions_mount_and_interpreter(self):
+        entry = self.root / "check.sh"
+        entry.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        entry.chmod(0o755)
+        log = self.root / "check.log"
+        with patch.object(workflow.subprocess, "Popen", side_effect=PermissionError(13, "Permission denied")):
+            self.assertEqual(workflow.execute_check(["./check.sh"], self.root, log, 5), (127, False))
+        text = log.read_text(encoding="utf-8")
+        self.assertIn("Permission denied", text)
+        self.assertIn("noexec", text)
+        self.assertIn("shebang", text)
 
     def test_directory_link_requires_actual_target_coverage(self):
         shared = self.root / "shared"

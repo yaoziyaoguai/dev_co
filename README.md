@@ -2,7 +2,7 @@
 
 给刚开始用 AI 做完整项目，又经常把目标和上下文聊丢的人。
 
-![dev_co：两个开发工具共用一本当前计划，沿着小步骤推进](assets/dev-co-cover.png)
+![dev_co：两个开发工具共用一本当前计划，沿着小步骤推进](assets/dev-co-cover.webp)
 
 `dev_co` 是可以由兼容 coding agent 共用的开发协作入口。它让 Agent 在持续开发中维护当前目标、自动选择当前需要的专项能力、分清决定和想法、交付能检查的小结果，并留下下一次接手需要的记录。
 
@@ -57,6 +57,8 @@ python3 scripts/install_skill.py --check
 OpenCode、ZCode 等其他宿主应先核实其实际技能目录、全局规则文件和原生调用方式，再链接或同步同一来源。不要把 Codex 专用元数据、工具调用名或运行权限当作其他宿主已经支持。文件同步、技能发现和实际任务执行分别验证。
 
 安装后开启新会话。Codex 用 `$dev_co`，Claude Code 用 `/dev_co`。已有会话读过旧版时，需要重新读取技能。
+
+`de-slop`、`compose-ui-kit` 和 `modern-web-guidance` 是按需使用的独立技能。需要时安装到宿主的同级 `skills/` 目录，或使用宿主支持的项目技能目录（如 Codex 的 `.agents/skills/`）。专项入口缺失时，`dev_co` 沿用项目工具和内置指南完成相关核对。
 
 ### 更新已安装版本
 
@@ -120,6 +122,7 @@ Agent 先读取现有资料、代码和可用工具，自己完成常规方法�
 | 规划准备构建的软件/系统、持续功能开发、复杂修复、恢复开发和交接 | 使用 dev_co |
 | 开发或改造评测系统，验证当前开发增量 | 使用 dev_co |
 | 独立跑评测、benchmark、模型对比、结果分析、调研报告 | 直接处理任务 |
+| 独立的增量反防御清理（冗余捕获或静默兜底） | 直接使用可用的 `de-slop`，缺少入口时按当前差异处理 |
 | 一次性脚本、孤立小修改、普通代码问答、单次审查 | 直接处理任务 |
 
 你可以明确调用、退出，或选择其他主流程。历史上用过这个技能，不意味着以后每一轮都必须使用。
@@ -247,7 +250,7 @@ python3 scripts/repository_check.py --help
 python3 scripts/workflow_hooks.py --help
 ```
 
-已有记录的接入格式和可选 Hook 配置见[辅助脚本说明](references/helpers-and-hooks.md)。新记录默认按相关内容判断功能证据是否过期；检查依赖 Git 版本或分支时使用 `freshness: git`，旧记录省略该字段仍保持严格模式。Git 目录输入遵循跟踪/ignore 规则，显式真实文件优先，执行位及选中链接的实际依赖也参与核对；无 Git 项目可声明输出排除范围。
+已有记录的接入格式和可选 Hook 配置见[辅助脚本说明](references/helpers-and-hooks.md)。新记录默认按相关内容判断功能证据是否过期；检查依赖 Git 版本或分支时使用 `freshness: git`，旧记录省略该字段仍保持严格模式。Git 目录输入遵循跟踪/ignore 规则，显式真实文件优先，执行位及选中链接的实际依赖也参与核对；无 Git 项目可声明输出排除范围。仓库规则设置 `"check_anchors": true` 可同时检查本地 Markdown 锚点。
 
 独立的“候选想法”段落默认可以更新而不重跑检查，采纳后须移入有效决定。自定义进展标题用 `non_intent_sections`，与仅控制摘要的 `brief_sections` 分开。旧意图/文件指纹会失效一次，只需重跑原有相关检查。
 
@@ -261,7 +264,7 @@ python3 scripts/workflow_hooks.py --help
 
 需要轮转旧验证日志时，用 `verify --keep-runs 20` 保留最近的完整运行。当前运行和未完成的记录会保留。
 
-创建记录或基线时默认使用当前目录。CLI 和 Hook 读取已有项目时，在当前 Git 工作树内选择最近的状态或基线所在目录。用 `--root` 可固定项目目录。Hook 默认生成 `SessionStart` 配置，覆盖 `startup`、`resume`、`clear`、`compact` 和 `fork`。超过 6,000 个 UTF-8 字节的自动摘要会改为提供记录路径和补读提示。可选 `--check-on-stop` 提醒证据缺口，续跑由当前请求决定。生成配置后按宿主要求审阅并核对实际触发。
+创建记录或基线时默认使用当前目录。状态 CLI 和 Hook 在当前 Git 工作树内查找最近的状态或基线，自动寻根时跳过软链候选。独立仓库检查会识别子项目自己的规则或基线。用 `--root` 可固定项目目录。Hook 默认生成 `SessionStart` 配置，覆盖 `startup`、`resume`、`clear`、`compact` 和 `fork`。超过 6,000 个 UTF-8 字节的自动摘要会改为提供记录路径和补读提示。可选 `--check-on-stop` 提醒证据缺口，续跑由当前请求决定。生成配置后按宿主要求审阅并核对实际触发。
 
 `gate` 通过，只说明声明范围内的证据仍匹配。它不会自动判断测试是否充分，也不授予发布权限。脚本不隔离网络、不硬控预算、不自动脱敏日志。
 
@@ -309,6 +312,18 @@ LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0 python3 -m unittest discover -s test
 ```
 
 标准库测试覆盖状态兼容、证据失效与复用、进程清理、文件和链接边界、仓库基线、安装与 Hook 输出。修改路由规则时，按[行为评测说明](evals/README.md)在目标宿主选跑合成场景，检查 Agent 的实际动作和产物。
+
+### 2026-11-22 v3 修复验证
+
+Codex CLI 0.166.0 和 Claude Code 2.1.330 均从临时 Git 项目的子项目 `src/` 目录启动。两宿主使用临时配置和本地固定模型响应，Hook 加载和工具执行由真实 CLI 处理。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| 双宿主 `SessionStart` | 子项目的 `docs` 软链指向父仓共享目录。存在子项目自己的 `CURRENT.md` 时，两宿主都收到子项目标记。子项目没有独立记录时，两宿主都收到父仓标记。 |
+| 双宿主 `PreToolUse` | 配置精确匹配 `Bash`。正常检查通过时，命令创建了测试文件。向就绪检查注入 `RuntimeError` 后，Hook 以退出码 2 结束，两宿主都报告拦截，测试文件均未创建。 |
+| macOS 全量回归 | Python 3.14.7 下，默认 UTF-8 和 `LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0` 各通过 175 项，各跳过 1 项仅适用于 Linux 文件系统的用例。 |
+| Linux 全量回归 | Python 3.11.2 下，使用严格 ASCII 环境及实际挂载为 `noexec` 的 `/tmp`，176 项全部通过。 |
+| 评测场景 | 22 个场景均完成初始化和只读核对。独立审查场景仅有预期的两处未暂存差异。 |
 
 ### 2026-11-22 de-slop 接入验证
 
