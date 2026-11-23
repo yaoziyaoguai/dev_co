@@ -39,7 +39,7 @@ def repository_context_root(cwd: Path, policy_name: str) -> Path:
 
 
 def load_json(root: Path, name: str) -> dict:
-    path = workflow.safe_path(root, name, no_symlinks=True)
+    path = workflow.safe_path(root, name, no_symlinks=True, label="规则或检查记录路径")
     if workflow.secret_like(Path(name)):
         raise workflow.WorkflowError("规则和检查记录不得使用凭据路径：" + name)
     try:
@@ -122,7 +122,7 @@ def fingerprints(root: Path, names: list[str]) -> dict:
     result = {}
     total = 0
     for name in sorted(set(names)):
-        path = workflow.safe_path(root, name, no_symlinks=True)
+        path = workflow.safe_path(root, name, no_symlinks=True, label="更新规则输入或文档路径")
         if workflow.secret_like(Path(name)):
             raise workflow.WorkflowError("更新规则不得读取凭据路径：" + name)
         if not path.exists():
@@ -143,12 +143,35 @@ def fingerprints(root: Path, names: list[str]) -> dict:
 
 def markdown_lines(path: Path):
     fence = None
+    in_list = False
+    blank = True
     for line in workflow.read_text(path, 1_000_000).splitlines():
         if fence:
-            if workflow.fence_end(line, fence):
+            if re.fullmatch(r"[ \t]*" + re.escape(fence[0]) + "{" + str(len(fence)) + r",}[ \t]*", line):
                 fence = None
             continue
+        if not line.strip():
+            blank = True
+            continue
+        list_match = re.match(r"^(?: {0,12}|\t{1,3})(?:[-+*]|\d+[.)])[ \t]+(.*)$", line)
+        if list_match:
+            in_list = True
+            fence = workflow.fence_start(list_match[1])
+            blank = False
+            if not fence:
+                yield line
+            continue
+        if in_list and line.startswith(("  ", "\t")) and not blank:
+            list_fence = workflow.fence_start(line.lstrip(" \t"))
+            if list_fence:
+                fence = list_fence
+                continue
+            yield line
+            continue
+        if not line.startswith((" ", "\t")):
+            in_list = False
         fence = workflow.fence_start(line)
+        blank = False
         if not fence and not line.startswith(("    ", "\t")):
             yield line
 
@@ -178,7 +201,7 @@ def broken_links(root: Path, sources: list[str], *, check_anchors: bool = False)
     broken = set()
     anchors: dict[Path, set[str]] = {}
     for name in sources:
-        path = workflow.safe_path(root, name, no_symlinks=True)
+        path = workflow.safe_path(root, name, no_symlinks=True, label="引用检查路径")
         if workflow.secret_like(Path(name)):
             raise workflow.WorkflowError("引用检查不得读取凭据路径：" + name)
         if not path.is_file():
@@ -223,22 +246,7 @@ def require_scope(scope: str | None) -> str:
 
 
 def git_origin(root: Path) -> dict | None:
-    try:
-        probe = subprocess.run(["git", "--no-optional-locks", "-C", str(root), "rev-parse", "--show-toplevel"],
-                               capture_output=True, timeout=5)
-        if probe.returncode != 0:
-            return None
-        values = {}
-        for key, args in (("branch", ["symbolic-ref", "--short", "HEAD"]),
-                          ("head", ["rev-parse", "--verify", "HEAD"])):
-            result = subprocess.run(["git", "--no-optional-locks", "-C", str(root), *args],
-                                    capture_output=True, encoding="utf-8", errors="surrogateescape", timeout=5)
-            values[key] = result.stdout.strip() if result.returncode == 0 else None
-        return values
-    except FileNotFoundError:
-        return None
-    except subprocess.TimeoutExpired as error:
-        raise workflow.WorkflowError("无法核对基线 Git 来源：查询超时。") from error
+    return workflow.git_head_and_branch(root)
 
 
 def load_baseline(root: Path, policy_name: str, scope: str | None = None) -> dict:
@@ -372,7 +380,7 @@ def checkpoint(root: Path, policy_name: str = POLICY, *, scope: str | None = Non
     return result
 
 
-def switch_scope(root: Path, policy_name: str, scope: str, next_scope: str) -> dict:
+def switch_scope(root: Path, policy_name: str, scope: str, next_scope: str, *, state_name: str | None = None) -> dict:
     from project_workflow import load_state, locate_state
 
     root = root.resolve()
@@ -387,7 +395,7 @@ def switch_scope(root: Path, policy_name: str, scope: str, next_scope: str) -> d
         return result
     warnings = result["warnings"]
     try:
-        state = locate_state(root)
+        state = locate_state(root, state_name)
         if state is not None:
             meta, _ = load_state(state)
             verification = meta.get("verification")
@@ -442,6 +450,7 @@ def main() -> int:
     parser.add_argument("--policy", default=POLICY)
     parser.add_argument("--scope", required=True, help="沿用当前工作线/增量标识；普通继续开发不更换。")
     parser.add_argument("--next-scope", help="switch-scope 接入的新工作线。")
+    parser.add_argument("--state", help="可选状态记录路径；供 switch-scope 核对自定义记录的 repository_scope。")
     parser.add_argument("--rule")
     parser.add_argument("--reason", default="")
     parser.add_argument("--json", action="store_true")
@@ -452,6 +461,9 @@ def main() -> int:
             raise workflow.WorkflowError("项目目录不存在。")
         policy_name = workflow.path_text(args.policy)
         scope = workflow.path_text(args.scope)
+        state_name = workflow.path_text(args.state) if args.state else None
+        if args.state and args.command != "switch-scope":
+            raise workflow.WorkflowError("--state 只用于 switch-scope。")
         if args.root is None and args.command != "adopt":
             root = repository_context_root(root, policy_name)
         if args.command == "review":
@@ -460,7 +472,8 @@ def main() -> int:
         elif args.command == "switch-scope":
             if not args.next_scope or not args.next_scope.strip():
                 raise workflow.WorkflowError("switch-scope 需要 --next-scope。")
-            result = switch_scope(root, policy_name, scope, workflow.path_text(args.next_scope))
+            result = switch_scope(root, policy_name, scope, workflow.path_text(args.next_scope),
+                                  state_name=state_name)
         else:
             result = {"adopt": adopt, "check": check, "checkpoint": checkpoint}[args.command](root, policy_name, scope=scope)
         if args.json:

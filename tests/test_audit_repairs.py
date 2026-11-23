@@ -109,6 +109,48 @@ class InputCoverageTests(ProjectFixture):
         self.assertIn("noexec", text)
         self.assertIn("shebang", text)
 
+    def test_parent_and_partial_directory_links_require_full_target_coverage(self):
+        other = self.root / "other"
+        other.mkdir()
+        (other / "hidden_dep.py").write_text("x = 1\n", encoding="utf-8")
+        up = self.root / "src/up"
+        up.symlink_to("..", target_is_directory=True)
+        with self.assertRaisesRegex(workflow.WorkflowError, "链接目标未进入实际验证输入.*src/up"):
+            self.verify()
+        up.unlink()
+
+        shared = self.root / "shared"
+        shared.mkdir()
+        (shared / "a.txt").write_text("1", encoding="utf-8")
+        (shared / "b.txt").write_text("2", encoding="utf-8")
+        (self.root / "src/shared").symlink_to(shared, target_is_directory=True)
+        self.meta["verification"]["inputs"].append("shared/a.txt")
+        self.save()
+        with self.assertRaisesRegex(workflow.WorkflowError, "链接目标未进入实际验证输入.*src/shared"):
+            self.verify()
+        self.meta["verification"]["inputs"].append("shared/b.txt")
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+
+    def test_broken_git_metadata_fails_closed_without_non_git_fallback(self):
+        (self.root / ".git").write_text("gitdir: /nonexistent/devco-gitdir\n", encoding="utf-8")
+        with self.assertRaisesRegex(workflow.WorkflowError, "拒绝降级为无 Git 模式"):
+            workflow.snapshot(self.root, ["src"], self.state)
+        with self.assertRaisesRegex(workflow.WorkflowError, "拒绝降级为无 Git 模式"):
+            repository.git_origin(self.root)
+        with self.assertRaisesRegex(workflow.WorkflowError, "拒绝降级为无 Git 模式"):
+            workflow.identity(self.root)
+
+    def test_git_timeout_is_reported_in_identity_and_surfaced_in_brief(self):
+        timeout_err = subprocess.TimeoutExpired(["git", "status"], 10)
+        with patch("workflow_files.subprocess.run", side_effect=timeout_err):
+            with self.assertRaisesRegex(workflow.WorkflowError, "超时"):
+                workflow.identity(self.root)
+        with patch.object(workflow, "identity", return_value={"root": str(self.root), "head": "abc", "branch": "main"}):
+            with patch("project_workflow.git_value", side_effect=workflow.WorkflowError("Git 查询超时（status）")):
+                summary = workflow.brief(self.root, self.state, compact=True)
+        self.assertIn("工作树状态未能完成核对", summary)
+
     def test_directory_link_requires_actual_target_coverage(self):
         shared = self.root / "shared"
         shared.mkdir()

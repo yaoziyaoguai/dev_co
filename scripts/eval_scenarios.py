@@ -94,7 +94,11 @@ def changes(root: Path, reference: Path, *, git: bool) -> list[str]:
         elif not path.is_dir():
             differences.add(name)
     if git:
-        for name, args in (("HEAD", ("rev-parse", "--verify", "HEAD")), ("index", ("ls-files", "--stage", "-z"))):
+        for name, args in (
+            ("HEAD", ("rev-parse", "--verify", "HEAD")),
+            ("index", ("ls-files", "--stage", "-z")),
+            ("refs", ("for-each-ref", "--format=%(refname) %(objectname)")),
+        ):
             if run_git(root, *args) != run_git(reference, *args):
                 differences.add(Path(".git") / name)
     return sorted(path_text(path) for path in differences)
