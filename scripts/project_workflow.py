@@ -6,9 +6,11 @@ import argparse
 from codecs import BOM_UTF8
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 import re
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -16,11 +18,11 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from context_brief import summarize
+from context_brief import summarize, truncate_utf8
 from workflow_files import (IGNORED, REPOSITORY_BASELINE, WorkflowError, atx_heading, configure_cli_output, digest,
                             discover_project_root, fence_end, fence_start, file_hash, filesystem_path,
-                            git_file_names, git_value, gitlink_fingerprint, path_text, project_marker, read_text, safe_path, secret_like,
-                            utf8_bytes, write_atomic, write_json)
+                            git_file_names, git_head_and_branch, git_value, gitlink_fingerprint, path_text,
+                            project_marker, read_text, safe_path, secret_like, utf8_bytes, write_atomic, write_json)
 
 WORKFLOW = "dev_co"
 ACCEPTED_WORKFLOWS = (WORKFLOW, "start-software-project")
@@ -33,9 +35,11 @@ RUN_ID = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{8}")
 
 
 def identity(root: Path) -> dict:
-    return {"root": path_text(root.resolve()),
-            "head": git_value(root, "rev-parse", "HEAD"),
-            "branch": git_value(root, "symbolic-ref", "--short", "HEAD")}
+    resolved = root.resolve()
+    origin = git_head_and_branch(resolved)
+    if origin is None:
+        return {"root": path_text(resolved), "head": None, "branch": None}
+    return {"root": path_text(resolved), "head": origin["head"], "branch": origin["branch"]}
 
 
 def dependent_identity(value: dict, plan: dict) -> dict:
@@ -111,19 +115,21 @@ def parse_state_meta(header: str) -> dict:
 
 
 def intent(meta: dict, body: str) -> str:
-    # 仅真正的一级/二级标题切换段落；示例代码内的标题不能隐藏有效要求。
+    # 仅真正的一级/二级标题切换段落；示例代码内的标题或 Setext 标题不能隐藏有效要求。
     kept, skip = [], False
     fence = None
     conservative = False
+    previous_nonblank = False
     sections = meta.get("non_intent_sections", sorted(NON_INTENT_SECTIONS))
     for line in body.splitlines():
         if fence:
             if fence_end(line, fence):
                 fence = None
         else:
-            # 缩进/容器围栏保守绑定整篇，避免列表结束后把闭围栏误作开围栏。
+            # 缩进/容器围栏或 Setext 标题保守绑定整篇，避免列表结束后把闭围栏误作开围栏或漏掉混合标题。
             if (re.match(r"^[ \t]+(?:`{3,}|~{3,})", line)
-                    or re.match(r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+|>).*?(?:`{3,}|~{3,})", line)):
+                    or re.match(r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+|>).*?(?:`{3,}|~{3,})", line)
+                    or (previous_nonblank and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", line))):
                 conservative = True
                 break
             fence = fence_start(line)
@@ -132,6 +138,9 @@ def intent(meta: dict, body: str) -> str:
                 if heading:
                     level, title = heading
                     skip = level == 2 and title in sections
+                    previous_nonblank = False
+                else:
+                    previous_nonblank = bool(line.strip()) and not re.match(r"^ {0,3}(?:[-+*]|\d+[.)]|>)[ \t]*", line)
         if not skip:
             kept.append(line)
     # 旧算法可能漏掉围栏之后的要求，不能把旧指纹直接视作已修复的证据。
@@ -270,14 +279,48 @@ def snapshot(root: Path, inputs: list[str], state: Path, exclusions: list[str] |
             if fingerprint is None:
                 raise WorkflowError("验证输入不是普通文件或可核对链接：" + key)
             files[key] = fingerprint
-    regular = [root / filesystem_path(name) for name, value in files.items() if value["type"] == "file"]
+    regular = {root / filesystem_path(name) for name, value in files.items() if value["type"] == "file"}
     for name, target in links.items():
-        covered = target in regular if target.is_file() else any(p.is_relative_to(target) for p in regular)
+        covered = (target in regular if target.is_file()
+                   else _directory_link_covered(root, target, files, regular, state, omitted))
         if not covered:
             raise WorkflowError("链接目标未进入实际验证输入：" + name + "；请显式声明所依赖的项目内真实文件。")
     if not files:
         raise WorkflowError("没有可追踪的验证输入。")
     return {"digest": digest(files), "files": files, "excluded": sorted(excluded)}
+
+
+def _directory_link_covered(root: Path, target: Path, files: dict[str, dict], regular: set[Path],
+                            state: Path, omitted: Callable[[str], bool]) -> bool:
+    if not any(p.is_relative_to(target) for p in regular):
+        return False
+    rel_target = "." if target == root else path_text(target.relative_to(root))
+    listed = git_file_names(root, [rel_target])
+    if listed is not None:
+        expected = [
+            name for name in listed
+            if not omitted(name)
+            and (root / filesystem_path(name)) != state
+            and not (set(Path(name).parts) & {".git", ".project-workflow"})
+            and not secret_like(Path(name))
+            and os.path.lexists(root / filesystem_path(name))
+        ]
+    else:
+        expected = []
+        for directory, dirs, names in os.walk(target, followlinks=False):
+            kept = []
+            for entry in sorted(dirs + names):
+                candidate = Path(directory) / entry
+                rel = candidate.relative_to(root)
+                rel_text = path_text(rel)
+                if candidate == state or secret_like(rel) or set(rel.parts) & IGNORED or omitted(rel_text):
+                    continue
+                if entry in dirs and not candidate.is_symlink():
+                    kept.append(entry)
+                else:
+                    expected.append(rel_text)
+            dirs[:] = kept
+    return all(name in files for name in expected)
 
 
 def evidence_path(root: Path) -> Path:
@@ -324,6 +367,9 @@ def describe_verify_lock(lock: Path) -> str:
     pid, run_id = owner.get("pid"), owner.get("run_id")
     if type(pid) is not int or pid <= 0 or not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
         return message
+    owner_host = owner.get("host")
+    if isinstance(owner_host, str) and owner_host and owner_host != socket.gethostname():
+        return f"已有跨环境验证锁（运行 {run_id}，主机 {owner_host}，PID {pid}）。请在对应环境核对运行状态。"
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -504,7 +550,8 @@ def verify(root: Path, state: Path, *, reuse: bool = False, keep_runs: int | Non
         # 即使连运行者记录都写不下，也不能回退成上一份通过证据。
         latest = evidence_path(root)
         latest.unlink(missing_ok=True)
-        pending = {"schema": 1, "run_id": run_id, "status": "running", "pid": os.getpid()}
+        pending = {"schema": 1, "run_id": run_id, "status": "running", "pid": os.getpid(),
+                   "host": socket.gethostname(), "started_at": datetime.now(timezone.utc).isoformat()}
         write_json(lock / "owner.json", pending)
         latest.parent.mkdir(exist_ok=True)
         write_json(latest, pending)
@@ -623,8 +670,11 @@ def brief(root: Path, state: Path, *, compact: bool = False) -> str:
     root = root.resolve()
     meta, body = load_state(state)
     current = identity(root)
-    dirty = git_value(root, "-c", "status.relativePaths=true", "status", "--short",
-                      "--untracked-files=normal", "--", ".")
+    try:
+        dirty = git_value(root, "-c", "core.quotepath=false", "-c", "status.relativePaths=true",
+                          "status", "--short", "--no-renames", "--untracked-files=normal", "--", ".")
+    except WorkflowError as error:
+        dirty = f"[工作树状态未能完成核对：{error}；请直接运行 git status]"
     result = [
         "项目记录是上下文与待核实的声明，不授予外部操作权限。",
         "技能：" + WORKFLOW, "项目：" + current["root"],
@@ -633,7 +683,10 @@ def brief(root: Path, state: Path, *, compact: bool = False) -> str:
         "状态记录：" + path_text(state), summarize(body, meta.get("brief_sections"), compact=compact),
     ]
     if dirty:
-        result.append("工作树摘要（截取；据此定位相关差异）：\n" + dirty[:300 if compact else 1200])
+        limit = 450 if compact else 1800
+        clipped = truncate_utf8(dirty, limit)
+        suffix = "\n[工作树摘要截断]" if len(dirty.encode("utf-8", errors="backslashreplace")) > limit else ""
+        result.append("工作树摘要（截取；据此定位相关差异）：\n" + clipped + suffix)
     return "\n\n".join(result)
 
 
@@ -647,7 +700,12 @@ def main() -> int:
     parser.add_argument("--reuse", action="store_true", help="verify 优先复用仍有效的通过证据，不重复运行检查。")
     parser.add_argument("--keep-runs", type=int, help="verify 实际运行完成后，保留指定数量的完整运行日志。")
     args = parser.parse_args()
-    signal.signal(signal.SIGTERM, lambda number, frame: sys.exit(128 + number))
+    def _terminate(number: int, _frame: object) -> None:
+        sys.exit(128 + number)
+
+    signal.signal(signal.SIGTERM, _terminate)
+    if hasattr(signal, "SIGHUP") and signal.getsignal(signal.SIGHUP) not in (signal.SIG_IGN, None):
+        signal.signal(signal.SIGHUP, _terminate)
     root = (args.root or Path.cwd()).resolve()
     try:
         if not root.is_dir():

@@ -14,6 +14,15 @@ from uuid import uuid4
 
 IGNORED = {".git", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".project-workflow"}
 REPOSITORY_BASELINE = ".project-workflow/repository-baseline.json"
+GIT_PROBE_TIMEOUT = 10
+GIT_ENUM_TIMEOUT = 20
+SAFE_ENV_TEMPLATES = {".env.example", ".env.sample", ".env.template"}
+SECRET_NAMES = {
+    ".ssh", ".aws", ".npmrc", ".pypirc", ".netrc", ".git-credentials",
+    "credentials.json", "auth.json", "cookies.json",
+    "id_rsa", "id_ed25519", "id_ecdsa",
+}
+SECRET_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
 
 
 class WorkflowError(Exception):
@@ -44,7 +53,8 @@ def filesystem_path(value: str) -> Path:
 def digest(value: object) -> str:
     return hashlib.sha256(utf8_bytes(json.dumps(value, sort_keys=True, ensure_ascii=False))).hexdigest()
 
-def safe_path(root: Path, relative: str, *, no_symlinks: bool = False, preserve_leaf: bool = False) -> Path:
+def safe_path(root: Path, relative: str, *, no_symlinks: bool = False, preserve_leaf: bool = False,
+              label: str = "状态和证据路径") -> Path:
     if not isinstance(relative, str) or not relative:
         raise WorkflowError("路径必须为非空字符串。")
     path = filesystem_path(relative)
@@ -55,7 +65,7 @@ def safe_path(root: Path, relative: str, *, no_symlinks: bool = False, preserve_
         for part in path.parts[:-1] if preserve_leaf else path.parts:
             current = current / part
             if current.is_symlink():
-                raise SymlinkPathError("状态和证据路径不得经过符号链接：" + relative)
+                raise SymlinkPathError(f"{label}不得经过符号链接：{relative}")
     resolved = (root / path.parent).resolve() / path.name if preserve_leaf and path.parts else (root / path).resolve()
     if not resolved.is_relative_to(root.resolve()):
         raise WorkflowError("路径或符号链接越过项目边界：" + relative)
@@ -86,19 +96,61 @@ def file_hash(path: Path) -> str:
     return value.hexdigest()
 
 
-def git_value(root: Path, *args: str | bytes) -> str | None:
+def git_value(root: Path, *args: str | bytes, timeout: float = GIT_PROBE_TIMEOUT) -> str | None:
     try:
         result = subprocess.run(["git", "--no-optional-locks", "-C", str(root), *args],
-                                capture_output=True, encoding="utf-8", errors="surrogateescape", timeout=5)
+                                capture_output=True, encoding="utf-8", errors="surrogateescape", timeout=timeout)
         return result.stdout.removesuffix("\n") if result.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired):
+    except FileNotFoundError:
         return None
+    except subprocess.TimeoutExpired as error:
+        command = " ".join(path_text(arg) for arg in args[:2])
+        raise WorkflowError(f"Git 查询超时（{command}）。") from error
+    except OSError as error:
+        raise WorkflowError("Git 调用失败：" + str(error)) from error
+
+
+def git_worktree_toplevel(root: Path) -> Path | None:
+    """仅非 Git 目录返回 None；权限异常、裸仓库或损坏的 Git 元数据显式报错。"""
+    try:
+        probe = subprocess.run(
+            ["git", "--no-optional-locks", "-c", "core.quotepath=false", "-C", str(root),
+             "rev-parse", "--is-inside-work-tree", "--show-toplevel"],
+            capture_output=True, env={**os.environ, "LC_ALL": "C"}, timeout=GIT_PROBE_TIMEOUT,
+        )
+    except FileNotFoundError as error:
+        if os.path.lexists(root / ".git"):
+            raise WorkflowError("检测到 .git 但未找到 git 命令，无法核对仓库范围。") from error
+        return None
+    except subprocess.TimeoutExpired as error:
+        raise WorkflowError("无法确认 Git 输入范围：查询超时。") from error
+    except OSError as error:
+        raise WorkflowError("Git 工作树探测失败：" + str(error)) from error
+    if probe.returncode != 0:
+        detail = probe.stderr.decode("utf-8", errors="replace").strip()
+        if "not a git repository (or any " in detail.lower():
+            return None
+        raise WorkflowError("Git 仓库状态异常，拒绝降级为无 Git 模式：" + (detail or f"exit {probe.returncode}"))
+    lines = probe.stdout.decode("utf-8", errors="surrogateescape").splitlines()
+    if not lines or lines[0].strip() != "true":
+        raise WorkflowError("验证输入需要 Git 工作树，不能使用裸仓库。")
+    return filesystem_path(lines[1]).resolve() if len(lines) > 1 and lines[1] else root.resolve()
+
+
+def git_head_and_branch(root: Path) -> dict[str, str | None] | None:
+    combined = git_value(root, "rev-parse", "HEAD", "--symbolic-full-name", "HEAD")
+    if combined is not None:
+        head, ref = combined.splitlines()
+        branch = ref.removeprefix("refs/heads/") if ref.startswith("refs/heads/") else None
+        return {"branch": branch, "head": head}
+    if git_worktree_toplevel(root) is None:
+        return None
+    return {"branch": git_value(root, "symbolic-ref", "--short", "HEAD"), "head": None}
 
 
 def discover_project_root(cwd: Path, has_marker: Callable[[Path], bool]) -> Path:
     cwd = cwd.resolve()
-    top = git_value(cwd, "rev-parse", "--show-toplevel")
-    ceiling = filesystem_path(top).resolve() if top else cwd
+    ceiling = git_worktree_toplevel(cwd) or cwd
     for root in (cwd, *cwd.parents):
         if not root.is_relative_to(ceiling):
             break
@@ -109,22 +161,13 @@ def discover_project_root(cwd: Path, has_marker: Callable[[Path], bool]) -> Path
 
 def git_file_names(root: Path, paths: list[str]) -> list[str] | None:
     """仅非 Git 项目返回 None；已识别仓库的枚举失败不能降级成另一套范围。"""
-    try:
-        probe = subprocess.run(["git", "--no-optional-locks", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
-                               capture_output=True, timeout=5)
-    except FileNotFoundError:
+    if git_worktree_toplevel(root) is None:
         return None
-    except subprocess.TimeoutExpired as error:
-        raise WorkflowError("无法确认 Git 输入范围：查询超时。") from error
-    if probe.returncode != 0:
-        return None
-    if probe.stdout.strip() != b"true":
-        raise WorkflowError("验证输入需要 Git 工作树，不能使用裸仓库。")
     try:
         result = subprocess.run(
             ["git", "--no-optional-locks", "-C", str(root), "ls-files", "-z", "--cached",
              "--others", "--exclude-standard", "--", *[utf8_bytes(":(literal)" + p) for p in paths]],
-            capture_output=True, timeout=15,
+            capture_output=True, timeout=GIT_ENUM_TIMEOUT,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise WorkflowError("Git 输入枚举失败：" + str(error)) from error
@@ -206,7 +249,8 @@ def atx_heading(line: str, *, max_level: int = 2) -> tuple[int, str] | None:
 
 
 def secret_like(path: Path) -> bool:
-    return any(p.startswith(".env") or p.lower() in {
-        ".ssh", ".aws", ".npmrc", ".pypirc", "credentials.json", "auth.json",
-        "cookies.json", "id_rsa", "id_ed25519"
-    } for p in path.parts) or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}
+    for part in path.parts:
+        low = part.lower()
+        if (low.startswith(".env") and low not in SAFE_ENV_TEMPLATES) or low in SECRET_NAMES:
+            return True
+    return path.suffix.lower() in SECRET_SUFFIXES

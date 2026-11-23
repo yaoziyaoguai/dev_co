@@ -6,6 +6,17 @@ from workflow_files import atx_heading, fence_end, fence_start
 DEFAULT_SECTIONS = ("本轮目标", "验收标准", "项目约束", "当前决定", "代码导航", "推进约定", "最近验证", "下一步")
 
 
+def utf8_len(text: str) -> int:
+    return len(text.encode("utf-8", errors="backslashreplace"))
+
+
+def truncate_utf8(text: str, max_bytes: int) -> str:
+    encoded = text.encode("utf-8", errors="backslashreplace")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
 def summarize(body: str, selected: object = None, *, compact: bool = False) -> str:
     titles = list(DEFAULT_SECTIONS) if selected is None else selected
     if (not isinstance(titles, list) or not titles
@@ -34,27 +45,30 @@ def summarize(body: str, selected: object = None, *, compact: bool = False) -> s
             sections.append((title, start + 1, end, "\n".join(lines[start + 1:end]).strip()))
 
     selected_sections = {title: [s for s in sections if s[0] == title] for title in titles}
-    if selected is None and len(body.strip()) <= (1600 if compact else 6500) and all(
-            len(s) <= 1 for s in selected_sections.values()):
-        return body.strip()
+    raw = body.strip()
+    within_raw_limit = utf8_len(raw) <= 2200 if compact else len(raw) <= 6500
+    if selected is None and within_raw_limit and all(len(s) <= 1 for s in selected_sections.values()):
+        return raw
 
     result = ["按恢复章节提取原文（行号相对正文）；截断、缺项或未列入的约束需按导航补读，不能据此宣称已完整接手。"]
     prefix_end = next((start for _, start, level in headings if level == 2), len(lines))
     intro = "\n".join(lines[:prefix_end]).strip()
     if intro:
-        result.append("正文前言：\n" + intro[:400] + ("\n[前言截断，需补读]" if len(intro) > 400 else ""))
+        intro_limit = 360 if compact else 600
+        clipped_intro = truncate_utf8(intro, intro_limit)
+        result.append("正文前言：\n" + clipped_intro + ("\n[前言截断，需补读]" if utf8_len(intro) > utf8_len(clipped_intro) else ""))
     found = [title for title, entries in selected_sections.items() if entries]
-    # 给每个恢复字段留位置，长历史不会挤掉末尾的下一步或验收。
-    budget = 1200 if compact else 5200
-    allowance = max(80, (budget - sum(len(t) for t in found)) // max(1, len(found)))
+    # 按 UTF-8 字节给每个恢复字段留位置，避免多字节中文触发宿主尾部静默截断。
+    budget = 2000 if compact else 5200
+    allowance = max(120, (budget - sum(utf8_len(t) + 32 for t in found)) // max(1, len(found)))
     for title in found:
         entries = selected_sections[title]
         if len(entries) != 1:
             result.append("## " + title + "\n同名段落存在歧义，请核对正文行号：" + ", ".join(str(s[1]) for s in entries))
             continue
         _, start, end, text = entries[0]
-        excerpt = text[:allowance]
-        if len(text) > allowance:
+        excerpt = truncate_utf8(text, allowance)
+        if utf8_len(text) > utf8_len(excerpt):
             excerpt += "\n[本段截断；仍需读取完整约束]"
         result.append(f"## {title}（正文 {start}–{end} 行）\n{excerpt}")
     missing = [t for t in titles if t not in found]

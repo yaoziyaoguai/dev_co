@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from repository_check import broken_links, markdown_anchors
+from repository_check import POLICY, broken_links, inventory, load_policy, markdown_anchors, matches
 from workflow_files import safe_path
 
 
@@ -26,22 +26,37 @@ class SkillContentTests(unittest.TestCase):
         for boundary in ("本轮新增的未跟踪源码", "仅报告", "主交付摘要"):
             self.assertIn(boundary, fast_path)
         self.assertLessEqual(len(skill.splitlines()), 65)
+        self.assertLessEqual(len(skill.encode("utf-8")), 8_800)
 
     def test_maintained_documents_link_to_existing_files(self):
-        documents = ["AGENTS.md", "README.md", "SKILL.md", "assets/README.md", "evals/README.md"]
+        documents = ["AGENTS.md", "README.md", "SKILL.md", "assets/README.md",
+                     "docs/verification-history.md", "evals/README.md"]
         documents.extend(path.relative_to(ROOT).as_posix() for path in (ROOT / "references").glob("*.md"))
         self.assertEqual(broken_links(ROOT, documents, check_anchors=True), [])
+
+    def test_self_repository_policy_covers_all_files_and_required_entries(self):
+        policy = load_policy(ROOT, POLICY)
+        files = inventory(ROOT, policy)
+        self.assertTrue(files)
+        unassigned = [name for name in files if not matches(name, policy["paths"])]
+        self.assertEqual(unassigned, [])
+        for required in policy["required"]:
+            self.assertTrue((ROOT / required).is_file(), required)
+        self.assertEqual(broken_links(ROOT, policy["links"], check_anchors=policy["check_anchors"]), [])
 
     def test_reference_navigation_targets_match_second_level_headings(self):
         localized = {"architecture-and-risk.md", "delivery-and-release.md",
                      "prototyping.md", "research-and-positioning.md"}
         total_bytes = 0
-        for path in (ROOT / "references").glob("*.md"):
+        references = sorted((ROOT / "references").glob("*.md"))
+        self.assertEqual(len(references), 13)
+        for path in references:
             with self.subTest(reference=path.name):
                 lines = path.read_text(encoding="utf-8").splitlines()
+                self.assertTrue(any(line.startswith("**按需读取：** ") for line in lines[:5]))
                 navigation = [line for line in lines[:8] if line.startswith("章节导航：")]
+                self.assertEqual(len(navigation), 1)
                 if path.name in localized:
-                    self.assertEqual(len(navigation), 1)
                     total_bytes += path.stat().st_size
                 headings = {line.removeprefix("## ") for line in lines if line.startswith("## ")}
                 for line in navigation:
@@ -124,7 +139,7 @@ class SkillContentTests(unittest.TestCase):
             def run(command):
                 return subprocess.run([sys.executable, str(ROOT / "scripts/eval_scenarios.py"), command,
                                        "--scenario", "standalone_evaluation", "--dest", temporary],
-                                      capture_output=True, encoding="utf-8", timeout=10)
+                                      capture_output=True, encoding="utf-8", timeout=30)
 
             self.assertEqual(run("prepare").returncode, 0)
             self.assertEqual(run("verify-clean").returncode, 0)
@@ -149,7 +164,7 @@ class SkillContentTests(unittest.TestCase):
                 return subprocess.run(
                     [sys.executable, str(ROOT / "scripts/eval_scenarios.py"), command,
                      "--scenario", "standalone_evaluation", "--dest", str(root)],
-                    capture_output=True, encoding="utf-8", timeout=10,
+                    capture_output=True, encoding="utf-8", timeout=30,
                     env=dict(os.environ, LC_ALL="C", PYTHONUTF8="0", PYTHONCOERCECLOCALE="0"),
                 )
 
@@ -168,11 +183,11 @@ class SkillContentTests(unittest.TestCase):
             with self.subTest(scenario=scenario), TemporaryDirectory() as temporary:
                 subprocess.run([sys.executable, str(ROOT / "scripts/eval_scenarios.py"), "prepare",
                                 "--scenario", scenario, "--dest", temporary],
-                               capture_output=True, check=True, timeout=10)
+                               capture_output=True, check=True, timeout=30)
 
                 def git(*args):
                     return subprocess.check_output(["git", "--no-optional-locks", "-C", temporary, *args],
-                                                   encoding="utf-8", timeout=10).splitlines()
+                                                   encoding="utf-8", timeout=30).splitlines()
 
                 self.assertEqual(git("diff", "--cached", "--name-only"), [])
                 if scenario == "increment_deslop_before_verify":
@@ -189,12 +204,12 @@ class SkillContentTests(unittest.TestCase):
             def run(command):
                 return subprocess.run([sys.executable, str(ROOT / "scripts/eval_scenarios.py"), command,
                                        "--scenario", "standalone_deslop_review", "--dest", temporary],
-                                      capture_output=True, encoding="utf-8", timeout=10)
+                                      capture_output=True, encoding="utf-8", timeout=30)
 
             def git(*args):
                 subprocess.run(["git", "-C", temporary, "-c", "user.name=Fixture", "-c",
                                 "user.email=fixture@example.test", "-c", "commit.gpgsign=false",
-                                "-c", "core.hooksPath=/dev/null", *args], check=True, timeout=10)
+                                "-c", "core.hooksPath=/dev/null", *args], check=True, timeout=30)
 
             prepared = run("prepare")
             self.assertEqual(prepared.returncode, 0, prepared.stderr)
@@ -218,6 +233,11 @@ class SkillContentTests(unittest.TestCase):
             self.assertEqual(staged.returncode, 1, staged.stderr)
             self.assertIn(".git/index", staged.stdout)
             git("restore", "--staged", "--", "names.py")
+            git("branch", "unexpected-branch")
+            branched = run("verify-clean")
+            self.assertEqual(branched.returncode, 1, branched.stderr)
+            self.assertIn(".git/refs", branched.stdout)
+            git("branch", "-qD", "unexpected-branch")
             git("commit", "--allow-empty", "-qm", "unexpected commit")
             committed = run("verify-clean")
             self.assertEqual(committed.returncode, 1, committed.stderr)

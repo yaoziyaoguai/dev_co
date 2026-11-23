@@ -13,6 +13,11 @@ import project_workflow as workflow
 from workflow_files import configure_cli_output, filesystem_path, path_text
 
 SESSION_CONTEXT_MAX_BYTES = 6000
+CODEX_ADDITIONAL_CONTEXT_LIMIT = 4000
+HOST_CONTEXT_MAX_BYTES = {
+    "codex": 3800,
+    "claude": SESSION_CONTEXT_MAX_BYTES,
+}
 
 
 def configured_root(root: Path) -> Path:
@@ -33,7 +38,7 @@ def config(host: str, state: str | None, protect_tools: list[str], root: Path | 
     matcher = "startup|resume|clear|compact|fork"
     session = {"type": "command", "command": command, "timeout": 10}
     if host == "codex":
-        session["additionalContextLimit"] = 4000
+        session["additionalContextLimit"] = CODEX_ADDITIONAL_CONTEXT_LIMIT
     hooks = {
         "SessionStart": [{"matcher": matcher, "hooks": [session]}],
     }
@@ -48,7 +53,8 @@ def config(host: str, state: str | None, protect_tools: list[str], root: Path | 
 
 
 def respond(payload: dict, state_name: str | None = None, protect: bool = False,
-            root: Path | None = None, check_on_stop: bool = False) -> dict:
+            root: Path | None = None, check_on_stop: bool = False,
+            *, host: str | None = None) -> dict:
     event = payload.get("hook_event_name")
     if event not in {"SessionStart", "Stop", "PreToolUse"}:
         return {}
@@ -74,8 +80,9 @@ def respond(payload: dict, state_name: str | None = None, protect: bool = False,
                 raise workflow.WorkflowError("未找到指定或已接入的项目状态记录。")
             return {}
         if event == "SessionStart":
+            limit = HOST_CONTEXT_MAX_BYTES.get(host, SESSION_CONTEXT_MAX_BYTES)
             context = workflow.brief(root, state, compact=True)
-            if len(context.encode("utf-8", errors="backslashreplace")) > SESSION_CONTEXT_MAX_BYTES:
+            if len(context.encode("utf-8", errors="backslashreplace")) > limit:
                 context = (f"状态记录：{path_text(state)}\n"
                            "自动恢复摘要超过长度预算。请读取该记录或运行 brief，核对目标、约束、验收和下一步。")
             return {"hookSpecificOutput": {"hookEventName": "SessionStart",
@@ -130,7 +137,7 @@ def main() -> int:
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise ValueError("hook 输入必须为对象")
-        result = respond(payload, state_name, args.protect, args.root, args.check_on_stop)
+        result = respond(payload, state_name, args.protect, args.root, args.check_on_stop, host=args.host)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception as error:

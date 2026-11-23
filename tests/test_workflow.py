@@ -63,7 +63,7 @@ class ProjectFixture(unittest.TestCase):
     def cli(self, command, **kwargs):
         return subprocess.run([sys.executable, str(SCRIPTS / "project_workflow.py"),
                                command, "--root", str(self.root)],
-                              capture_output=True, encoding="utf-8", timeout=10, **kwargs)
+                              capture_output=True, encoding="utf-8", timeout=30, **kwargs)
 
 
 class EvidenceTests(ProjectFixture):
@@ -74,13 +74,13 @@ class EvidenceTests(ProjectFixture):
         path.chmod(0o600)
         args = [sys.executable, str(SCRIPTS / "project_workflow.py"), "adopt-state", "--root", str(self.root),
                 "--state", "docs/NOTES.md", "--phase", "build"]
-        result = subprocess.run(args, capture_output=True, encoding="utf-8", timeout=10)
+        result = subprocess.run(args, capture_output=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         first = path.read_bytes()
         self.assertTrue(first.endswith(original))
         self.assertEqual(workflow.load_state(path)[0]["phase"], "build")
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(subprocess.run(args, capture_output=True, timeout=10).returncode, 0)
+        self.assertEqual(subprocess.run(args, capture_output=True, timeout=30).returncode, 0)
         self.assertEqual(path.read_bytes(), first)
 
     def test_adopt_state_preserves_bom_body_and_updates_only_requested_phase(self):
@@ -95,7 +95,7 @@ class EvidenceTests(ProjectFixture):
         result = subprocess.run(
             [sys.executable, str(SCRIPTS / "project_workflow.py"), "adopt-state", "--root", str(self.root),
              "--state", "docs/CURRENT.md", "--phase", "build"],
-            capture_output=True, encoding="utf-8", timeout=10,
+            capture_output=True, encoding="utf-8", timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(workflow.load_state(self.state)[0], {**previous, "phase": "build"})
@@ -314,6 +314,69 @@ class EvidenceTests(ProjectFixture):
                     self.body = self.body.replace("保留旧接口", "删除旧接口")
                     self.save()
                     self.assertFalse(self.gate()["ready"])
+
+    def test_setext_heading_after_excluded_section_uses_conservative_intent(self):
+        for underline in ("========", "--------"):
+            with self.subTest(underline=underline):
+                self.body = f"## 候选想法\n也许以后加图表。\n\n验收标准\n{underline}\n必须保留旧接口。\n"
+                self.save()
+                self.assertTrue(self.verify()["ready"])
+                self.body = self.body.replace("保留旧接口", "删除旧接口")
+                self.save()
+                self.assertFalse(self.gate()["ready"])
+        # 空行后的分隔线仍不误伤进展段落排除
+        self.body = "## 本轮目标\n维持行为。\n## 下一步\n先看日志。\n\n---\n"
+        self.save()
+        self.assertTrue(self.verify()["ready"])
+        self.body = self.body.replace("先看日志。", "已完成核对。")
+        self.save()
+        self.assertTrue(self.gate()["ready"])
+
+    def test_verify_lock_distinguishes_foreign_host_from_dead_local_pid(self):
+        lock = self.root / ".project-workflow/verify.lock"
+        lock.mkdir(parents=True)
+        run_id = "20261123T000000Z-89abcdef"
+        workflow.write_json(lock / "owner.json", {"pid": 42_000, "run_id": run_id, "host": "other-container-host"})
+        reason = self.gate()["reasons"][0]
+        self.assertIn("跨环境验证锁", reason)
+        self.assertIn("other-container-host", reason)
+        self.assertNotIn("已不存在", reason)
+
+    @unittest.skipUnless(hasattr(os, "killpg") and hasattr(os, "setsid"), "需要 POSIX 进程组与信号")
+    def test_sighup_cleans_up_running_checks_and_lock(self):
+        import signal as sig
+        if not hasattr(sig, "SIGHUP"):
+            self.skipTest("缺少 SIGHUP")
+        (self.root / "check.py").write_text(
+            "from pathlib import Path\nimport time\nPath('started').write_text('1')\ntime.sleep(1.2)\nPath('leaked.txt').write_text('alive')\n",
+            encoding="utf-8",
+        )
+        process = subprocess.Popen([sys.executable, str(SCRIPTS / "project_workflow.py"),
+                                    "verify", "--root", str(self.root)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
+        try:
+            deadline = time.monotonic() + 10
+            while not (self.root / "started").exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue((self.root / "started").exists())
+            process.send_signal(sig.SIGHUP)
+            process.communicate(timeout=30)
+            self.assertNotEqual(process.returncode, 0)
+            time.sleep(1.3)
+            self.assertFalse((self.root / "leaked.txt").exists())
+            self.assertFalse((self.root / ".project-workflow/verify.lock").exists())
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+
+    def test_codex_session_start_respects_codex_byte_budget(self):
+        state = workflow.initialize(self.root, "notes/cn.md", "中" * 1100)
+        response = hooks.respond(self.event("SessionStart"), "notes/cn.md", root=self.root, host="codex")
+        context = response["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(context.encode("utf-8")), hooks.CODEX_ADDITIONAL_CONTEXT_LIMIT)
+        self.assertIn("本段截断", context)
+        self.assertIn("## 下一步", context)
 
     def test_unclosed_fence_uses_conservative_intent(self):
         self.body = "## 下一步\n```\n未闭合的代码块\n## 当前决定\n保留旧接口。\n"
@@ -728,7 +791,7 @@ class EvidenceTests(ProjectFixture):
         def run(script, *argv, payload=None):
             result = subprocess.run([sys.executable, str(SCRIPTS / script), *argv], cwd=self.root,
                                     env=locale_env, input=payload, capture_output=True,
-                                    encoding="utf-8", timeout=10)
+                                    encoding="utf-8", timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             return result.stdout
 

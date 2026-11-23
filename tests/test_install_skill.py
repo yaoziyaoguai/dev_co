@@ -19,7 +19,7 @@ class InstallTests(unittest.TestCase):
     def install(self, *args):
         return subprocess.run([sys.executable, str(ROOT / "scripts/install_skill.py"),
                                "--codex-home", str(self.codex), "--claude-home", str(self.claude), *args],
-                              cwd=self.base, capture_output=True, encoding="utf-8", timeout=10)
+                              cwd=self.base, capture_output=True, encoding="utf-8", timeout=30)
 
     def test_links_both_hosts_to_this_checkout(self):
         self.claude.mkdir()

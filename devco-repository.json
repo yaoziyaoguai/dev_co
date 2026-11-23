@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "paths": {
+    "SKILL.md": "核心技能定义与按需导航入口",
+    "README.md": "面向使用者的安装、使用与路由说明",
+    "AGENTS.md": "仓库自身维护约束",
+    "LICENSE": "开源许可证",
+    ".gitignore": "生成物与本地环境忽略规则",
+    "devco-repository.json": "仓库自身的文件归属与资料更新规则",
+    ".github/workflows/": "跨平台标准库自动化回归配置",
+    "agents/": "宿主展示元数据与隐式调用策略",
+    "assets/": "README 封面插画与生成记录",
+    "docs/": "历次宿主与回归验证归档",
+    "evals/": "合成行为回归场景与执行说明",
+    "references/": "按问题展开的专项参考指南",
+    "scripts/": "零依赖标准库运行时辅助脚本",
+    "tests/": "标准库回归单元测试"
+  },
+  "required": [
+    "SKILL.md",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "links": [
+    "AGENTS.md",
+    "README.md",
+    "SKILL.md",
+    "assets/README.md",
+    "docs/verification-history.md",
+    "evals/README.md",
+    "references/architecture-and-risk.md",
+    "references/delivery-and-release.md",
+    "references/helpers-and-hooks.md",
+    "references/memory-and-handoff.md",
+    "references/new-project.md",
+    "references/project-fit.md",
+    "references/prototyping.md",
+    "references/repository-lifecycle.md",
+    "references/research-and-positioning.md",
+    "references/specialist-skills.md",
+    "references/specification-workflows.md",
+    "references/ui-design.md",
+    "references/verification-and-recovery.md"
+  ],
+  "check_anchors": true,
+  "updates": [
+    {
+      "id": "routing-guidance",
+      "inputs": ["SKILL.md"],
+      "documents": ["README.md"]
+    },
+    {
+      "id": "helper-cli-docs",
+      "inputs": [
+        "scripts/project_workflow.py",
+        "scripts/repository_check.py",
+        "scripts/workflow_hooks.py"
+      ],
+      "documents": ["references/helpers-and-hooks.md"]
+    }
+  ],
+  "ignore": []
+}

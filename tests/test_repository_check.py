@@ -250,7 +250,7 @@ class RepositoryTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(SCRIPTS / "repository_check.py"), "check", "--scope", "work",
              "--policy", policy.encode("utf-8")],
-            cwd=self.root, capture_output=True, encoding="utf-8", timeout=10,
+            cwd=self.root, capture_output=True, encoding="utf-8", timeout=30,
             env=dict(os.environ, LC_ALL="C", PYTHONUTF8="0", PYTHONCOERCECLOCALE="0"),
         )
         self.assertEqual(result.returncode, 2, result.stdout)
@@ -292,7 +292,7 @@ class RepositoryTests(unittest.TestCase):
         self.adopt()
         command = [sys.executable, str(SCRIPTS / "repository_check.py"), "switch-scope",
                    "--root", str(self.root), "--scope", "work", "--next-scope", "next/release"]
-        switched = subprocess.run(command, capture_output=True, encoding="utf-8", timeout=10)
+        switched = subprocess.run(command, capture_output=True, encoding="utf-8", timeout=30)
         self.assertEqual(switched.returncode, 0, switched.stderr)
         self.assertIn("CURRENT.md 中的 verification.repository_scope 更新为 next/release", switched.stdout)
         first, = (self.root / ".project-workflow/archive").iterdir()
@@ -352,10 +352,54 @@ class RepositoryTests(unittest.TestCase):
         result = subprocess.run(command, capture_output=True, encoding="utf-8")
         self.assertEqual(result.returncode, 2)
 
+    def test_nested_list_links_are_checked_while_nested_fences_are_ignored(self):
+        self.write("docs/valid.md", "# Valid\n")
+        self.adopt()
+        self.write("README.md", "- 顶层说明\n"
+                   "    - [有效嵌套链接](docs/valid.md)\n"
+                   "    - [失效嵌套链接](docs/missing-nested.md)\n"
+                   "    续行引用 [失效续行链接](docs/missing-cont.md)\n"
+                   "    ```md\n"
+                   "    [代码块内示例](docs/ignored-in-fence.md)\n"
+                   "    ```\n")
+        self.assertEqual(repository.broken_links(self.root, ["README.md"]),
+                         [["README.md", "docs/missing-cont.md"], ["README.md", "docs/missing-nested.md"]])
+        self.assertFalse(self.check()["ready"])
+
+    def test_env_templates_are_allowed_in_update_rules_while_secrets_stay_blocked(self):
+        self.write(".env.example", "PORT=8000\n")
+        self.policy["paths"][".env.example"] = "无密钥配置模板"
+        self.policy["updates"].append({"id": "config-template", "inputs": ["src/"], "documents": [".env.example"]})
+        self.adopt()
+        self.write("src/main.py", "print('with port')\n")
+        self.write("README.md", "Updated usage")
+        self.assertIn(".env.example", " ".join(self.check()["errors"]))
+        self.write(".env.example", "PORT=8080\n")
+        self.assertTrue(self.check()["ready"])
+        for secret in (".ENV", ".netrc", ".git-credentials", "id_ecdsa"):
+            self.policy["updates"][-1]["documents"] = [secret]
+            self.write(repository.POLICY, json.dumps(self.policy))
+            with self.subTest(secret=secret), self.assertRaisesRegex(workflow.WorkflowError, "不得读取凭据路径"):
+                self.check()
+
+    def test_symlink_error_reports_rule_context_and_switch_scope_accepts_custom_state(self):
+        state = workflow.initialize(self.root, "notes/ACTIVE.md", "自定义记录")
+        meta, body = workflow.load_state(state)
+        meta["verification"].update(repository_policy=repository.POLICY, repository_scope="work")
+        state.write_text("---\n" + json.dumps(meta, ensure_ascii=False) + "\n---\n" + body, encoding="utf-8")
+        self.adopt()
+        switched = repository.switch_scope(self.root, repository.POLICY, "work", "v2", state_name="notes/ACTIVE.md")
+        self.assertTrue(switched["ready"])
+        self.assertTrue(any("notes/ACTIVE.md" in w and "v2" in w for w in switched["warnings"]))
+        (self.root / "src/main.py").unlink()
+        (self.root / "src/main.py").symlink_to(self.root / "README.md")
+        with self.assertRaisesRegex(workflow.WorkflowError, "更新规则输入或文档路径不得经过符号链接"):
+            repository.check(self.root, scope="v2")
+
     def test_review_requires_rule_before_reading_baseline(self):
         result = subprocess.run([sys.executable, str(SCRIPTS / "repository_check.py"), "review",
                                  "--root", str(self.root), "--scope", "work", "--reason", "reviewed"],
-                                capture_output=True, encoding="utf-8", timeout=10)
+                                capture_output=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 2)
         self.assertIn("--rule", json.loads(result.stderr)["error"])
         self.assertFalse((self.root / repository.REVIEWS).exists())

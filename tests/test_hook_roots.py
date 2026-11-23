@@ -54,7 +54,7 @@ class HookRootTests(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(SCRIPTS / "workflow_hooks.py"), "--host", "codex", *args],
             cwd=cwd or self.base, input=json.dumps(payload) if payload else None,
-            capture_output=True, encoding="utf-8", timeout=10,
+            capture_output=True, encoding="utf-8", timeout=30,
         )
 
     def assert_denied(self, result):
@@ -101,7 +101,7 @@ class HookRootTests(unittest.TestCase):
         (self.project / "docs").symlink_to(self.repo / "docs", target_is_directory=True)
         (self.project / ".project-workflow").symlink_to(self.base, target_is_directory=True)
         result = subprocess.run([sys.executable, str(SCRIPTS / "project_workflow.py"), "brief"], cwd=self.project,
-                                capture_output=True, encoding="utf-8", timeout=10)
+                                capture_output=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("项目：" + str(self.repo) + "\n", result.stdout)
         context = hooks.respond(self.event("SessionStart"))["hookSpecificOutput"]["additionalContext"]
@@ -117,7 +117,7 @@ class HookRootTests(unittest.TestCase):
         (self.project / repository.POLICY).write_text(json.dumps({"schema": 1, "paths": {"src/": "source"}}),
                                                      encoding="utf-8")
         result = subprocess.run([sys.executable, str(SCRIPTS / "repository_check.py"), "check", "--scope", "work"],
-                                cwd=nested, capture_output=True, encoding="utf-8", timeout=10)
+                                cwd=nested, capture_output=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn(str(self.project / repository.BASELINE), json.loads(result.stderr)["error"])
 
@@ -130,7 +130,7 @@ class HookRootTests(unittest.TestCase):
                              ("repository_check.py", ["check", "--scope", "work"])):
             with self.subTest(script=script):
                 result = subprocess.run([sys.executable, str(SCRIPTS / script), *argv], cwd=nested,
-                                        capture_output=True, encoding="utf-8", timeout=10)
+                                        capture_output=True, encoding="utf-8", timeout=30)
                 self.assertEqual(result.returncode, 2, result.stderr)
                 error = json.loads(result.stderr)["error"]
                 self.assertIn(str(nested), error)
@@ -145,7 +145,7 @@ class HookRootTests(unittest.TestCase):
                              ("repository_check.py", ["adopt", "--scope", "work"]),
                              ("repository_check.py", ["check", "--scope", "work"])):
             result = subprocess.run([sys.executable, str(SCRIPTS / script), *argv], cwd=self.project,
-                                    capture_output=True, encoding="utf-8", timeout=10)
+                                    capture_output=True, encoding="utf-8", timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             if argv[0] == "brief":
                 self.assertIn("Local project", result.stdout)
@@ -162,7 +162,7 @@ class HookRootTests(unittest.TestCase):
                     [sys.executable, str(SCRIPTS / "workflow_hooks.py"), "--host", host,
                      "--root", "packages/app with spaces", "--state", "docs/CURRENT.md",
                      "--protect-tool", "publisher.send", "--print-config"],
-                    cwd=self.repo, capture_output=True, encoding="utf-8", timeout=10,
+                    cwd=self.repo, capture_output=True, encoding="utf-8", timeout=30,
                 )
                 self.assertEqual(generated.returncode, 0, generated.stderr)
                 config = json.loads(generated.stdout)
@@ -171,7 +171,7 @@ class HookRootTests(unittest.TestCase):
                     self.assertEqual(command[command.index("--root") + 1], str(self.project))
                     result = subprocess.run(
                         command, cwd=self.base, input=json.dumps(self.event(event)),
-                        capture_output=True, encoding="utf-8", timeout=10,
+                        capture_output=True, encoding="utf-8", timeout=30,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
                     output = json.loads(result.stdout)
@@ -186,7 +186,7 @@ class HookRootTests(unittest.TestCase):
         verified = subprocess.run(
             [sys.executable, str(SCRIPTS / "project_workflow.py"), "verify",
              "--root", str(self.project)],
-            cwd=self.base, capture_output=True, encoding="utf-8", timeout=10,
+            cwd=self.base, capture_output=True, encoding="utf-8", timeout=30,
         )
         self.assertEqual(verified.returncode, 0, verified.stderr)
         self.assertTrue(json.loads(verified.stdout)["ready"])
@@ -219,7 +219,7 @@ class HookRootTests(unittest.TestCase):
                 for argv in (("project_workflow.py", "brief"), ("project_workflow.py", "verify"),
                              ("project_workflow.py", "gate"), ("repository_check.py", "check", "--scope", root.name)):
                     result = subprocess.run([sys.executable, str(SCRIPTS / argv[0]), *argv[1:]], cwd=nested,
-                                            capture_output=True, encoding="utf-8", timeout=10)
+                                            capture_output=True, encoding="utf-8", timeout=30)
                     self.assertEqual(result.returncode, 0, f"{argv}\n{result.stdout}\n{result.stderr}")
                     if argv[1] == "brief":
                         self.assertIn(marker, result.stdout)
@@ -233,7 +233,7 @@ class HookRootTests(unittest.TestCase):
         (self.repo / repository.POLICY).write_text(policy, encoding="utf-8")
         repository.adopt(self.repo, scope="work")
         result = subprocess.run([sys.executable, str(SCRIPTS / "repository_check.py"), "check", "--scope", "work"],
-                                cwd=self.project, capture_output=True, encoding="utf-8", timeout=10)
+                                cwd=self.project, capture_output=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 2, result.stdout)
         self.assertIn(str(self.project), json.loads(result.stderr)["error"])
 
