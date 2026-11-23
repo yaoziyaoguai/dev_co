@@ -58,7 +58,7 @@ OpenCode、ZCode 等其他宿主应先核实其实际技能目录、全局规则
 
 安装后开启新会话。Codex 用 `$dev_co`，Claude Code 用 `/dev_co`。已有会话读过旧版时，需要重新读取技能。
 
-`de-slop`、`compose-ui-kit` 和 `modern-web-guidance` 是按需使用的独立技能。需要时安装到宿主的同级 `skills/` 目录，或使用宿主支持的项目技能目录（如 Codex 的 `.agents/skills/`）。专项入口缺失时，`dev_co` 沿用项目工具和内置指南完成相关核对。
+`de-slop`、`compose-ui-kit` 和 `modern-web-guidance` 是按需配合的可选外部技能（宿主装有同名或同类技能时自动衔接，放到宿主的同级 `skills/` 目录或项目技能目录即可）。未安装这些外部技能时，`dev_co` 会自动使用内置指南和项目现有工具完成相关核对，无需预先配齐。
 
 ### 更新已安装版本
 
@@ -264,7 +264,7 @@ python3 scripts/workflow_hooks.py --help
 
 需要轮转旧验证日志时，用 `verify --keep-runs 20` 保留最近的完整运行。当前运行和未完成的记录会保留。
 
-创建记录或基线时默认使用当前目录。状态 CLI 和 Hook 在当前 Git 工作树内查找最近的状态或基线，自动寻根时跳过软链候选。独立仓库检查会识别子项目自己的规则或基线。用 `--root` 可固定项目目录。Hook 默认生成 `SessionStart` 配置，覆盖 `startup`、`resume`、`clear`、`compact` 和 `fork`。超过 6,000 个 UTF-8 字节的自动摘要会改为提供记录路径和补读提示。可选 `--check-on-stop` 提醒证据缺口，续跑由当前请求决定。生成配置后按宿主要求审阅并核对实际触发。
+创建记录或基线时默认使用当前目录。状态 CLI 和 Hook 在当前 Git 工作树内查找最近的状态或基线，自动寻根时跳过软链候选。独立仓库检查会识别子项目自己的规则或基线。用 `--root` 可固定项目目录。Hook 默认生成 `SessionStart` 配置，覆盖 `startup`、`resume`、`clear`、`compact` 和 `fork`。超出宿主长度预算（Codex 3,800 / Claude Code 6,000 个 UTF-8 字节）的自动摘要会改为提供记录路径和补读提示。可选 `--check-on-stop` 提醒证据缺口，续跑由当前请求决定。生成配置后按宿主要求审阅并核对实际触发。
 
 `gate` 通过，只说明声明范围内的证据仍匹配。它不会自动判断测试是否充分，也不授予发布权限。脚本不隔离网络、不硬控预算、不自动脱敏日志。
 
@@ -289,19 +289,22 @@ python3 scripts/workflow_hooks.py --host codex --root "$DEVCO_PROJECT_ROOT" --st
 ## 仓库结构与验证
 
 ```text
-SKILL.md                    日常加载的精简核心与按需入口
-agents/openai.yaml          Codex 展示信息和隐式调用策略
-references/                 当前环节需要时才读的详细指南
-scripts/install_skill.py    将源码链接到选定宿主的技能目录
-scripts/project_workflow.py 项目摘要、检查执行和证据核对
-scripts/repository_check.py 仓库基线、文件归属、引用和文档更新义务
-scripts/context_brief.py    长记录的结构化原文摘录
-scripts/workflow_files.py   共用的文件边界与指纹
-scripts/workflow_hooks.py   可选 Hook 配置生成与事件适配
+SKILL.md                     日常加载的精简核心与按需入口
+devco-repository.json        本仓自身的文件归属、链接锚点与资料更新规则
+agents/openai.yaml           Codex 展示信息和隐式调用策略
+references/                  当前环节需要时才读的详细指南
+scripts/install_skill.py     将源码链接到选定宿主的技能目录
+scripts/project_workflow.py  项目摘要、检查执行和证据核对
+scripts/repository_check.py  仓库基线、文件归属、引用和文档更新义务
+scripts/context_brief.py     长记录的结构化原文摘录
+scripts/workflow_files.py    共用的文件边界与指纹
+scripts/workflow_hooks.py    可选 Hook 配置生成与事件适配
 scripts/eval_scenarios.py    准备行为评测目录并核对只读场景的文件差异
-tests/                      标准库回归测试、评测样例和文档链接检查
-evals/                      技能行为场景，修改相关规则时选跑
-assets/                     封面及生成说明
+tests/                       标准库回归测试、评测样例和文档链接检查
+evals/                       技能行为场景，修改相关规则时选跑
+docs/verification-history.md 历次双宿主与跨平台回归验证记录
+.github/workflows/ci.yml     Ubuntu 与 macOS 多版本标准库回归矩阵
+assets/                      封面及生成说明
 ```
 
 辅助脚本仅依赖 Python 3.10+ 标准库，进程管理面向 macOS/Linux。
@@ -311,53 +314,7 @@ python3 -m unittest discover -s tests -v
 LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0 python3 -m unittest discover -s tests -v
 ```
 
-标准库测试覆盖状态兼容、证据失效与复用、进程清理、文件和链接边界、仓库基线、安装与 Hook 输出。修改路由规则时，按[行为评测说明](evals/README.md)在目标宿主选跑合成场景，检查 Agent 的实际动作和产物。
-
-### 2026-11-22 v3 修复验证
-
-Codex CLI 0.166.0 和 Claude Code 2.1.330 均从临时 Git 项目的子项目 `src/` 目录启动。两宿主先使用本地固定响应，再在修复版本 `a3435b7` 上各跑一次实际模型会话。两轮均由真实 CLI 加载和执行 Hook，使用会话级临时配置。
-
-| 验证 | 实际结果 |
-| --- | --- |
-| 固定响应的 `SessionStart` | 子项目的 `docs` 软链指向父仓共享目录。有独立 `CURRENT.md` 时，两宿主都收到子项目标记。子项目没有独立记录时，两宿主都收到父仓标记。 |
-| 固定响应的 `PreToolUse` | 配置精确匹配 `Bash`。正常检查通过时，命令创建了测试文件。向就绪检查注入 `RuntimeError` 后，Hook 以退出码 2 结束，两宿主都报告拦截，测试文件均未创建。 |
-| 实际响应模型 | Codex 使用 `gpt-6.2-sol`，Claude Code 使用现有配置返回的 `zcode/GLM-5.3`。 |
-| 实际模型的 `SessionStart` | `docs` 软链指向含干扰标记的父仓共享目录。两模型都准确回显了子项目自身 `CURRENT.md` 的随机标记。 |
-| 实际模型的 `PreToolUse` | 向就绪检查注入 `RuntimeError` 后，Hook 返回退出码 2。两宿主均拦截各自唯一一次 `Bash` 调用，测试文件均未创建。 |
-| macOS 全量回归 | Python 3.14.7 下，默认 UTF-8 和 `LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0` 各通过 175 项，各跳过 1 项仅适用于 Linux 文件系统的用例。 |
-| Linux 全量回归 | Python 3.11.2 下，使用严格 ASCII 环境及实际挂载为 `noexec` 的 `/tmp`，176 项全部通过。 |
-| 评测场景 | 22 个场景均完成初始化和只读核对。独立审查场景仅有预期的两处未暂存差异。 |
-
-### 2026-11-22 de-slop 接入验证
-
-在临时 Git 项目中使用独立安装的 `de-slop` 验证技能加载、调用顺序和修改范围。
-
-| 验证 | 实际结果 |
-| --- | --- |
-| 双宿主加载 | Codex CLI 0.166.0 用 `$de-slop`，Claude Code 2.1.330 用 `/de-slop`。两个宿主都识别了技能并完成只读报告 |
-| 持续开发 | Codex 实现汇总后检查并清理本轮未跟踪的 `amounts.py`，保留外部 JSON 校验和同文件历史函数。随后运行最终测试和 `verify --reuse`，`gate` 返回 0 |
-| 独立清理 | Claude Code 自行选用 `de-slop`，仅清理本轮差异中的内部兜底。历史函数及暂存区保持原样，3 项针对性测试通过 |
-| 只读验收 | Codex 在 `dev_co` 回合使用 `de-slop` 仅报告。前后的文件内容、Git 状态和暂存区差异一致 |
-| 标准库回归 | Linux 上 Python 3.11.2 的严格 ASCII 环境通过全部 155 项。macOS 上 Python 3.12.2 通过 154 项，跳过 1 项 Linux 专属用例 |
-
-### 2026-11-22 验证记录
-
-| 验证 | 实际结果 |
-| --- | --- |
-| 标准库回归 | Linux 上 Python 3.11.2 的严格 ASCII 环境通过全部 154 项。macOS 上 Python 3.12.2 通过 153 项，跳过 1 项 Linux 专属用例 |
-| 真实宿主 Hook | Codex CLI 0.166.0 和 Claude Code 2.1.330 均在临时 Git 项目中从子目录启动，读取 `--root` 和 `--state` 指定记录的独有标记。正常场景的 `Bash` 调用创建了测试文件。向 `PreToolUse` 注入 `RuntimeError` 后，脚本返回退出码 2，两个宿主都拦截了同一个工具调用 |
-
-### 2026-11-21 验证记录
-
-| 验证 | 实际结果 |
-| --- | --- |
-| 标准库回归 | macOS 上 Python 3.12.2 全套 133 项通过，Python 3.14.7 的 39 项相关检查通过 |
-| 证据复用 | 同一临时项目中，有效证据仍只需 1 次输入快照。证据过期后的重跑从 4 次降到 3 次，写入证据后的输入变更仍会被最终检查发现 |
-| 安装 | 在临时宿主目录验证双宿主链接、单宿主选择、已有安装和损坏链接的保护 |
-| 真实宿主 Hook | 对 `ff99eb9` 的改动进行实测。Codex CLI 0.166.0 和 Claude Code 2.1.330 均在启动时读取指定子项目的记录，正常 `Bash` 调用成功。向 `PreToolUse` 注入 `RuntimeError` 后，脚本返回退出码 2，两个宿主都拦下了测试命令 |
-| Hook 配置 | `clear`、`fork` 匹配和长摘要回退通过本地测试。真实会话实测覆盖 `startup` 和选定工具的异常拦截 |
-
-此前还在本地演练了两模块报价 CLI、老项目增量维护、证据失效与 scope 错配，并核对了 Codex、Claude Code、OpenCode、ZCode 的共用安装链接。[2026-11-08 验证版本](https://github.com/yaoziyaoguai/dev_co/commit/72a7fdd6ef99361bf43a11d5e729e32d852de745)
+标准库测试覆盖状态兼容、证据失效与复用、进程与信号清理、文件和软链边界、敏感路径与配置模板规则、仓库基线、安装与宿主 Hook 字节预算（当前 Linux 下默认 UTF-8 与严格 ASCII 环境各通过全部 187 项，仓库自举规则核对 0 失效引用）。修改路由规则时，按[行为评测说明](evals/README.md)在目标宿主选跑合成场景，检查 Agent 的实际动作和产物。各版本在 Codex CLI 与 Claude Code 上的真实会话实测及跨平台回归结果见[历次宿主与回归验证记录](docs/verification-history.md)。
 
 `dev_co` 的下划线是有意保留的命名。一些仅允许连字符的通用模板校验器会拒绝它，上述两个宿主已验证可以加载。
 
